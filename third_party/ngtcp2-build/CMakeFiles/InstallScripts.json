@@ -1,0 +1,13 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/ethan/Workspace/nwep/third_party/ngtcp2-build/cmake_install.cmake",
+		"/home/ethan/Workspace/nwep/third_party/ngtcp2-build/lib/cmake_install.cmake",
+		"/home/ethan/Workspace/nwep/third_party/ngtcp2-build/lib/includes/cmake_install.cmake",
+		"/home/ethan/Workspace/nwep/third_party/ngtcp2-build/crypto/cmake_install.cmake",
+		"/home/ethan/Workspace/nwep/third_party/ngtcp2-build/crypto/includes/cmake_install.cmake",
+		"/home/ethan/Workspace/nwep/third_party/ngtcp2-build/crypto/quictls/cmake_install.cmake",
+		"/home/ethan/Workspace/nwep/third_party/ngtcp2-build/third-party/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

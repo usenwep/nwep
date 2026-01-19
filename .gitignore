@@ -1,0 +1,7 @@
+*.md
+.clangd
+compile_commands.json
+
+tests/
+build/
+.claude

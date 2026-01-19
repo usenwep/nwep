@@ -1,0 +1,2 @@
+/usr/sbin/ar qc libngtcp2_crypto_quictls.a CMakeFiles/ngtcp2_crypto_quictls_static.dir/quictls.c.o CMakeFiles/ngtcp2_crypto_quictls_static.dir/__/shared.c.o
+/usr/sbin/ranlib libngtcp2_crypto_quictls.a
