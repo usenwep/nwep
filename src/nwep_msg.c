@@ -24,6 +24,7 @@
  */
 #include <nwep/nwep.h>
 
+#include <stdio.h>
 #include <string.h>
 
 /*
@@ -265,6 +266,11 @@ int nwep_msg_decode(nwep_msg *msg, const uint8_t *src, size_t srclen,
     return rv;
   }
 
+#ifdef NWEP_DEBUG
+  fprintf(stderr, "[nwep_msg_decode] srclen=%zu, payload_len=%u\n", srclen,
+          payload_len);
+#endif
+
   /* Check we have the full message */
   if (srclen < NWEP_FRAME_HEADER_SIZE + payload_len) {
     return NWEP_ERR_PROTO_INVALID_MESSAGE;
@@ -289,6 +295,11 @@ int nwep_msg_decode(nwep_msg *msg, const uint8_t *src, size_t srclen,
     return NWEP_ERR_PROTO_INVALID_MESSAGE;
   }
   p = nwep_get_uint32be(&header_count, p);
+
+#ifdef NWEP_DEBUG
+  fprintf(stderr, "[nwep_msg_decode] msg_type=%u, header_count=%u\n", msg->type,
+          header_count);
+#endif
 
   if (header_count > NWEP_MAX_HEADERS) {
     return NWEP_ERR_PROTO_TOO_MANY_HEADERS;

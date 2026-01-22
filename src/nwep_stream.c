@@ -120,6 +120,7 @@ int nwep_stream_request(nwep_conn *conn, const nwep_request *req,
                         nwep_stream **pstream) {
   nwep_stream *stream;
   int64_t stream_id;
+  int rv;
 
   if (conn == NULL || req == NULL || pstream == NULL) {
     return NWEP_ERR_INTERNAL_NULL_PTR;
@@ -129,9 +130,11 @@ int nwep_stream_request(nwep_conn *conn, const nwep_request *req,
     return NWEP_ERR_INTERNAL_INVALID_STATE;
   }
 
-  /* Allocate stream ID (client-initiated bidirectional streams are 0, 4, 8, ...) */
-  stream_id = conn->next_stream_id;
-  conn->next_stream_id += 4;
+  /* Open a real QUIC stream */
+  rv = nwep_quic_open_stream(conn, &stream_id);
+  if (rv != 0) {
+    return rv;
+  }
 
   stream = nwep_stream_new(conn, stream_id);
   if (stream == NULL) {
@@ -161,19 +164,22 @@ int nwep_stream_request(nwep_conn *conn, const nwep_request *req,
     return NWEP_ERR_INTERNAL_NOMEM;
   }
 
-  /*
-   * Note: Full QUIC stream integration would:
-   * 1. Encode request using nwep_msg_encode()
-   * 2. Open QUIC stream with ngtcp2_conn_open_bidi_stream()
-   * 3. Queue data for sending via ngtcp2_conn_write_stream()
-   * Currently the message is stored and the caller handles transport.
-   */
+  /* Encode and buffer request for sending */
+  rv = nwep_stream_send_request(stream, req->method, req->path, req->headers,
+                                req->header_count, req->body, req->body_len);
+  if (rv != 0) {
+    nwep_conn_remove_stream(conn, stream);
+    nwep_stream_free(stream);
+    return rv;
+  }
 
   *pstream = stream;
   return 0;
 }
 
 int nwep_stream_respond(nwep_stream *stream, const nwep_response *resp) {
+  int rv;
+
   if (stream == NULL || resp == NULL) {
     return NWEP_ERR_INTERNAL_NULL_PTR;
   }
@@ -197,12 +203,13 @@ int nwep_stream_respond(nwep_stream *stream, const nwep_response *resp) {
     stream->msg.header_count = count;
   }
 
-  /*
-   * Note: Full QUIC stream integration would:
-   * 1. Encode response using nwep_msg_encode()
-   * 2. Queue data for sending via ngtcp2_conn_write_stream()
-   * Currently the message is stored and the caller handles transport.
-   */
+  /* Encode and buffer response for sending */
+  rv = nwep_stream_send_response(stream, resp->status, resp->status_details,
+                                 resp->headers, resp->header_count, resp->body,
+                                 resp->body_len);
+  if (rv != 0) {
+    return rv;
+  }
 
   return 0;
 }

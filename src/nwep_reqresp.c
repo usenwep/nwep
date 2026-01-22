@@ -27,6 +27,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * Helper for length-aware string comparison (header values aren't null-terminated)
+ */
+static int streq_n(const uint8_t *s, size_t slen, const char *expected) {
+  size_t expected_len = strlen(expected);
+  return slen == expected_len && memcmp(s, expected, slen) == 0;
+}
+
 int nwep_method_is_valid(const char *method) {
   if (method == NULL) {
     return 0;
@@ -57,6 +65,17 @@ int nwep_method_allowed_0rtt(const char *method) {
 
   /* Only READ is allowed in 0-RTT for replay safety */
   return strcmp(method, NWEP_METHOD_READ) == 0;
+}
+
+/*
+ * Length-aware 0-RTT check for parsing (header values aren't null-terminated)
+ */
+static int method_allowed_0rtt_n(const uint8_t *method, size_t len) {
+  if (method == NULL || len == 0) {
+    return 0;
+  }
+  /* Only READ is allowed in 0-RTT for replay safety */
+  return streq_n(method, len, NWEP_METHOD_READ);
 }
 
 int nwep_status_is_valid(const char *status) {
@@ -107,8 +126,25 @@ int nwep_status_is_error(const char *status) {
   return !nwep_status_is_success(status);
 }
 
+/*
+ * Length-aware method validation for parsing (header values aren't null-terminated)
+ */
+static int method_is_valid_n(const uint8_t *method, size_t len) {
+  if (method == NULL || len == 0) {
+    return 0;
+  }
+
+  return streq_n(method, len, NWEP_METHOD_READ) ||
+         streq_n(method, len, NWEP_METHOD_WRITE) ||
+         streq_n(method, len, NWEP_METHOD_UPDATE) ||
+         streq_n(method, len, NWEP_METHOD_DELETE) ||
+         streq_n(method, len, NWEP_METHOD_CONNECT) ||
+         streq_n(method, len, NWEP_METHOD_HEARTBEAT);
+}
+
 int nwep_request_parse(nwep_request *req, const nwep_msg *msg) {
   const nwep_header *hdr;
+  const nwep_header *method_hdr;
 
   if (req == NULL || msg == NULL) {
     return NWEP_ERR_INTERNAL_NULL_PTR;
@@ -119,21 +155,23 @@ int nwep_request_parse(nwep_request *req, const nwep_msg *msg) {
     return NWEP_ERR_PROTO_INVALID_MESSAGE;
   }
 
-  hdr = nwep_msg_find_header(msg, NWEP_HDR_METHOD);
-  if (hdr == NULL || hdr->value_len == 0) {
+  method_hdr = nwep_msg_find_header(msg, NWEP_HDR_METHOD);
+  if (method_hdr == NULL || method_hdr->value_len == 0) {
     return NWEP_ERR_PROTO_MISSING_HEADER;
   }
 
-  req->method = (const char *)hdr->value;
-  if (!nwep_method_is_valid(req->method)) {
+  req->method = (const char *)method_hdr->value;
+  req->method_len = method_hdr->value_len;
+  if (!method_is_valid_n(method_hdr->value, method_hdr->value_len)) {
     return NWEP_ERR_PROTO_INVALID_METHOD;
   }
 
   hdr = nwep_msg_find_header(msg, NWEP_HDR_PATH);
   if (hdr != NULL && hdr->value_len > 0) {
     req->path = (const char *)hdr->value;
-  } else if (strcmp(req->method, NWEP_METHOD_CONNECT) != 0 &&
-             strcmp(req->method, NWEP_METHOD_HEARTBEAT) != 0) {
+    req->path_len = hdr->value_len;
+  } else if (!streq_n(method_hdr->value, method_hdr->value_len, NWEP_METHOD_CONNECT) &&
+             !streq_n(method_hdr->value, method_hdr->value_len, NWEP_METHOD_HEARTBEAT)) {
     return NWEP_ERR_PROTO_MISSING_HEADER;
   }
   hdr = nwep_msg_find_header(msg, NWEP_HDR_REQUEST_ID);
@@ -148,6 +186,41 @@ int nwep_request_parse(nwep_request *req, const nwep_msg *msg) {
   req->header_count = msg->header_count;
   req->body = msg->body;
   req->body_len = msg->body_len;
+
+  return 0;
+}
+
+/*
+ * Length-aware status validation for parsing (header values aren't null-terminated)
+ */
+static int status_is_valid_n(const uint8_t *status, size_t len) {
+  if (status == NULL || len == 0) {
+    return 0;
+  }
+
+  /* Success statuses */
+  if (streq_n(status, len, NWEP_STATUS_OK) ||
+      streq_n(status, len, NWEP_STATUS_CREATED) ||
+      streq_n(status, len, NWEP_STATUS_ACCEPTED) ||
+      streq_n(status, len, NWEP_STATUS_NO_CONTENT)) {
+    return 1;
+  }
+
+  /* Client error statuses */
+  if (streq_n(status, len, NWEP_STATUS_BAD_REQUEST) ||
+      streq_n(status, len, NWEP_STATUS_UNAUTHORIZED) ||
+      streq_n(status, len, NWEP_STATUS_FORBIDDEN) ||
+      streq_n(status, len, NWEP_STATUS_NOT_FOUND) ||
+      streq_n(status, len, NWEP_STATUS_CONFLICT) ||
+      streq_n(status, len, NWEP_STATUS_RATE_LIMITED)) {
+    return 1;
+  }
+
+  /* Server error statuses */
+  if (streq_n(status, len, NWEP_STATUS_INTERNAL_ERROR) ||
+      streq_n(status, len, NWEP_STATUS_UNAVAILABLE)) {
+    return 1;
+  }
 
   return 0;
 }
@@ -169,13 +242,15 @@ int nwep_response_parse(nwep_response *resp, const nwep_msg *msg) {
     return NWEP_ERR_PROTO_MISSING_HEADER;
   }
   resp->status = (const char *)hdr->value;
-  if (!nwep_status_is_valid(resp->status)) {
+  resp->status_len = hdr->value_len;
+  if (!status_is_valid_n(hdr->value, hdr->value_len)) {
     return NWEP_ERR_PROTO_INVALID_STATUS;
   }
 
   hdr = nwep_msg_find_header(msg, NWEP_HDR_STATUS_DETAILS);
   if (hdr != NULL && hdr->value_len > 0) {
     resp->status_details = (const char *)hdr->value;
+    resp->status_details_len = hdr->value_len;
   }
   resp->headers = msg->headers;
   resp->header_count = msg->header_count;
@@ -291,6 +366,7 @@ int nwep_stream_process_request(nwep_stream *stream, const uint8_t *data,
   nwep_header headers[NWEP_MAX_HEADERS];
   nwep_request req;
   nwep_conn *conn;
+  const nwep_header *method_hdr;
   int rv;
 
   if (stream == NULL || data == NULL) {
@@ -310,7 +386,10 @@ int nwep_stream_process_request(nwep_stream *stream, const uint8_t *data,
   if (rv != 0) {
     return rv;
   }
-  if (is_0rtt && !nwep_method_allowed_0rtt(req.method)) {
+  /* Use length-aware check since header values aren't null-terminated */
+  method_hdr = nwep_msg_find_header(&msg, NWEP_HDR_METHOD);
+  if (is_0rtt && method_hdr != NULL &&
+      !method_allowed_0rtt_n(method_hdr->value, method_hdr->value_len)) {
     return NWEP_ERR_PROTO_0RTT_REJECTED;
   }
   stream->method = req.method;
@@ -348,10 +427,17 @@ int nwep_stream_process_response(nwep_stream *stream, const uint8_t *data,
   }
 
   rv = nwep_msg_decode(&msg, data, data_len, headers, NWEP_MAX_HEADERS);
+#ifdef NWEP_DEBUG
+  fprintf(stderr, "[process_response] msg_decode returned %d\n", rv);
+#endif
   if (rv != 0) {
     return rv;
   }
   rv = nwep_response_parse(&resp, &msg);
+#ifdef NWEP_DEBUG
+  fprintf(stderr, "[process_response] response_parse returned %d, status=%.*s\n",
+          rv, (int)(resp.status ? 20 : 0), resp.status ? resp.status : "");
+#endif
   if (rv != 0) {
     return rv;
   }

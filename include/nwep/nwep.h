@@ -2812,7 +2812,9 @@ typedef struct nwep_identity {
  */
 typedef struct nwep_request {
   const char *method;
+  size_t method_len;
   const char *path;
+  size_t path_len;
   const nwep_header *headers;
   size_t header_count;
   const uint8_t *body;
@@ -2828,7 +2830,9 @@ typedef struct nwep_request {
  */
 typedef struct nwep_response {
   const char *status;
+  size_t status_len;
   const char *status_details;
+  size_t status_details_len;
   const nwep_header *headers;
   size_t header_count;
   const uint8_t *body;

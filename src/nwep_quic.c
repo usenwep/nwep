@@ -122,6 +122,10 @@ static int recv_stream_data_cb(ngtcp2_conn *conn, uint32_t flags,
 
   if (stream == NULL) {
     stream = nwep_stream_find(nconn, stream_id);
+#ifdef NWEP_DEBUG
+    fprintf(stderr, "[recv_stream_data] stream_id=%ld, found=%p, is_server=%d\n",
+            (long)stream_id, (void *)stream, nconn->is_server);
+#endif
     if (stream == NULL) {
       stream = nwep_stream_new(nconn, stream_id);
       if (stream == NULL) {
@@ -137,9 +141,20 @@ static int recv_stream_data_cb(ngtcp2_conn *conn, uint32_t flags,
     int rv = 0;
     uint8_t msg_type;
 
-    /* Route first message by type (offset 4 in wire format) */
-    if (datalen >= 5 && stream->msg.type == 0 && stream->recv_len == 0) {
+    /*
+     * Route first incoming message by type (offset 4 in wire format).
+     * Check recv_len == 0 to determine if this is the first received data.
+     * Note: stream->msg.type represents what WE sent, not what we're receiving.
+     */
+    if (datalen >= 5 && stream->recv_len == 0) {
       msg_type = data[4];
+
+#ifdef NWEP_DEBUG
+      fprintf(stderr,
+              "[recv_stream_data] routing msg_type=%d, datalen=%zu, "
+              "stream->msg.type=%d\n",
+              msg_type, datalen, stream->msg.type);
+#endif
 
       switch (msg_type) {
       case NWEP_MSG_NOTIFY:
@@ -157,8 +172,20 @@ static int recv_stream_data_cb(ngtcp2_conn *conn, uint32_t flags,
         break;
       }
     } else {
+#ifdef NWEP_DEBUG
+      fprintf(stderr,
+              "[recv_stream_data] fallback to process_data, datalen=%zu, "
+              "recv_len=%zu\n",
+              datalen, stream->recv_len);
+#endif
       rv = nwep_stream_process_data(stream, data, datalen);
     }
+
+#ifdef NWEP_DEBUG
+    if (rv != 0) {
+      fprintf(stderr, "[recv_stream_data] processing returned error %d\n", rv);
+    }
+#endif
 
     if (rv != 0) {
       return NGTCP2_ERR_CALLBACK_FAILURE;
@@ -550,6 +577,8 @@ nwep_ssize nwep_quic_write(nwep_conn *conn, uint8_t *data, size_t datalen,
   ngtcp2_path_storage ps;
   ngtcp2_pkt_info pi;
   ngtcp2_ssize nwrite;
+  ngtcp2_ssize ndatalen;
+  nwep_stream *stream;
 
   if (conn == NULL || conn->qconn == NULL || data == NULL) {
     return NWEP_ERR_INTERNAL_NULL_PTR;
@@ -557,7 +586,71 @@ nwep_ssize nwep_quic_write(nwep_conn *conn, uint8_t *data, size_t datalen,
 
   ngtcp2_path_storage_zero(&ps);
 
-  /* Write connection-level data (handshake, acks, etc.) */
+  /* Check for streams with pending send data */
+  for (stream = conn->streams; stream != NULL; stream = stream->next) {
+    if (stream->send_len > stream->send_offset) {
+      /* This stream has data to send */
+      const uint8_t *stream_data = stream->send_buf + stream->send_offset;
+      size_t stream_datalen = stream->send_len - stream->send_offset;
+      int fin = (stream->state == NWEP_STREAM_STATE_HALF_CLOSED_LOCAL ||
+                 stream->state == NWEP_STREAM_STATE_CLOSED);
+      uint32_t flags = fin ? NGTCP2_WRITE_STREAM_FLAG_FIN : 0;
+
+      nwrite = ngtcp2_conn_write_stream(conn->qconn, &ps.path, &pi, data,
+                                        datalen, &ndatalen, flags, stream->id,
+                                        stream_data, stream_datalen, ts);
+
+#ifdef NWEP_DEBUG
+      fprintf(stderr,
+              "[nwep_quic_write] ngtcp2_conn_write_stream(stream=%ld, "
+              "datalen=%zu, fin=%d) returned nwrite=%ld, ndatalen=%ld\n",
+              (long)stream->id, stream_datalen, fin, (long)nwrite,
+              (long)ndatalen);
+#endif
+
+      if (nwrite < 0) {
+        if (nwrite == NGTCP2_ERR_WRITE_MORE) {
+          /* This shouldn't happen without MORE flag, but handle it */
+          if (ndatalen > 0) {
+            stream->send_offset += (size_t)ndatalen;
+          }
+          continue;
+        }
+        if (nwrite == NGTCP2_ERR_STREAM_NOT_FOUND ||
+            nwrite == NGTCP2_ERR_STREAM_SHUT_WR) {
+          /* Stream closed, skip it */
+          continue;
+        }
+#ifdef NWEP_DEBUG
+        fprintf(stderr, "[nwep_quic_write] error: %s\n",
+                ngtcp2_strerror((int)nwrite));
+#endif
+        return NWEP_ERR_NETWORK_CONN_FAILED;
+      }
+
+      /* Update send offset based on how much stream data was accepted */
+      if (ndatalen > 0) {
+        stream->send_offset += (size_t)ndatalen;
+      }
+
+      /* Update path if changed */
+      if (nwrite > 0 && ps.path.local.addrlen > 0) {
+        memcpy(&conn->path.local_addr, ps.path.local.addr,
+               ps.path.local.addrlen);
+        conn->path.local_addrlen = ps.path.local.addrlen;
+        memcpy(&conn->path.remote_addr, ps.path.remote.addr,
+               ps.path.remote.addrlen);
+        conn->path.remote_addrlen = ps.path.remote.addrlen;
+      }
+
+      /* Packet complete, return it */
+      if (nwrite > 0) {
+        return (nwep_ssize)nwrite;
+      }
+    }
+  }
+
+  /* No stream data to send, write connection-level data (handshake, acks, etc.) */
   nwrite = ngtcp2_conn_write_pkt(conn->qconn, &ps.path, &pi, data, datalen, ts);
 
 #ifdef NWEP_DEBUG
