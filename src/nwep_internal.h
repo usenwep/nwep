@@ -68,6 +68,7 @@ struct nwep_stream {
   void *user_data;
 
   int is_server_initiated;
+  int is_handshake_stream;
 
   uint8_t trace_id[NWEP_TRACE_ID_LEN];
 
@@ -82,8 +83,9 @@ struct nwep_stream {
 
   /* Receive buffer */
   uint8_t *recv_buf;
-  size_t recv_len;
+  size_t recv_len;    /* Amount of data in buffer */
   size_t recv_cap;
+  size_t recv_offset; /* Stream offset of recv_buf[0] - tracks consumed data */
 
   /* Send buffer */
   uint8_t *send_buf;
@@ -111,6 +113,8 @@ struct nwep_conn {
 
   /* Handshake state */
   nwep_handshake handshake;
+  nwep_stream *handshake_stream;
+  int handshake_complete;
 
   /* Network path */
   nwep_path path;

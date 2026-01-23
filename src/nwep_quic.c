@@ -89,21 +89,445 @@ static int get_new_connection_id_cb(ngtcp2_conn *conn, ngtcp2_cid *cid,
 }
 
 /*
- * ngtcp2 callback: Handshake completed
+ * Helper: Send a handshake message on the handshake stream
+ */
+static int send_handshake_message(nwep_conn *conn, nwep_msg *msg) {
+  uint8_t *buf;
+  size_t len;
+  nwep_ssize written;
+
+  if (conn->handshake_stream == NULL) {
+    return NWEP_ERR_INTERNAL_INVALID_STATE;
+  }
+
+  len = nwep_msg_encode_len(msg);
+  if (len == 0) {
+    return NWEP_ERR_PROTO_INVALID_MESSAGE;
+  }
+
+  buf = (uint8_t *)malloc(len);
+  if (buf == NULL) {
+    return NWEP_ERR_INTERNAL_NOMEM;
+  }
+
+  if (nwep_msg_encode(buf, len, msg) != len) {
+    free(buf);
+    return NWEP_ERR_PROTO_INVALID_MESSAGE;
+  }
+
+  written = nwep_stream_write(conn->handshake_stream, buf, len);
+  free(buf);
+
+  if (written < 0) {
+    return (int)written;
+  }
+
+  return 0;
+}
+
+/*
+ * Client: Send CONNECT request to initiate WEB/1 handshake
+ */
+static int client_send_connect(nwep_conn *conn) {
+  nwep_msg msg;
+  nwep_header headers[16];
+  uint8_t header_buf[512];
+  int rv;
+
+  rv = nwep_connect_request_build(&msg, headers, 16, header_buf,
+                                  sizeof(header_buf), &conn->handshake);
+  if (rv != 0) {
+    return rv;
+  }
+
+  return send_handshake_message(conn, &msg);
+}
+
+/*
+ * Server: Send CONNECT response
+ */
+static int server_send_connect_response(nwep_conn *conn) {
+  nwep_msg msg;
+  nwep_header headers[16];
+  uint8_t header_buf[512];
+  int rv;
+
+  rv = nwep_connect_response_build(&msg, headers, 16, header_buf,
+                                   sizeof(header_buf), &conn->handshake);
+  if (rv != 0) {
+    return rv;
+  }
+
+  return send_handshake_message(conn, &msg);
+}
+
+/*
+ * Client: Send AUTHENTICATE request
+ */
+static int client_send_authenticate(nwep_conn *conn) {
+  nwep_msg msg;
+  nwep_header headers[16];
+  uint8_t header_buf[512];
+  int rv;
+
+  rv = nwep_auth_request_build(&msg, headers, 16, header_buf,
+                               sizeof(header_buf), &conn->handshake);
+  if (rv != 0) {
+    return rv;
+  }
+
+  return send_handshake_message(conn, &msg);
+}
+
+/*
+ * Server: Send AUTHENTICATE response
+ */
+static int server_send_auth_response(nwep_conn *conn) {
+  nwep_msg msg;
+  nwep_header headers[16];
+  int rv;
+
+  rv = nwep_auth_response_build(&msg, headers, 16, &conn->handshake);
+  if (rv != 0) {
+    return rv;
+  }
+
+  return send_handshake_message(conn, &msg);
+}
+
+/*
+ * Complete the handshake and notify the application
+ */
+static int complete_handshake(nwep_conn *conn) {
+  int rv;
+
+#ifdef NWEP_DEBUG
+  fprintf(stderr, "[complete_handshake] is_server=%d, on_connect=%p\n",
+          conn->is_server, (void *)conn->callbacks.on_connect);
+#endif
+
+  conn->handshake_complete = 1;
+
+  /* Set peer identity from handshake state */
+  memcpy(conn->peer_identity.pubkey, conn->handshake.peer_pubkey,
+         NWEP_ED25519_PUBKEY_LEN);
+  memcpy(&conn->peer_identity.nodeid, &conn->handshake.peer_nodeid,
+         sizeof(nwep_nodeid));
+
+  /* Call user's on_connect callback with peer identity */
+  if (conn->callbacks.on_connect != NULL) {
+#ifdef NWEP_DEBUG
+    fprintf(stderr, "[complete_handshake] Calling on_connect callback\n");
+#endif
+    rv = conn->callbacks.on_connect(conn, &conn->peer_identity,
+                                    conn->user_data);
+#ifdef NWEP_DEBUG
+    fprintf(stderr, "[complete_handshake] on_connect returned %d\n", rv);
+#endif
+    return rv;
+  }
+
+  return 0;
+}
+
+/*
+ * Process received handshake message
+ */
+static int process_handshake_message(nwep_conn *conn, const uint8_t *data,
+                                     size_t datalen) {
+  nwep_msg msg;
+  nwep_header headers[16];
+  int rv;
+
+  rv = nwep_msg_decode(&msg, data, datalen, headers, 16);
+  if (rv != 0) {
+    return rv;
+  }
+
+  if (conn->is_server) {
+    /* Server-side handshake processing */
+    switch (conn->handshake.state.server) {
+    case NWEP_SERVER_STATE_AWAITING_CONNECT:
+      /* Expecting CONNECT request */
+      if (msg.type != NWEP_MSG_REQUEST) {
+        return NWEP_ERR_PROTO_INVALID_MESSAGE;
+      }
+      rv = nwep_connect_request_parse(&conn->handshake, &msg);
+      if (rv != 0) {
+        return rv;
+      }
+      /* Send CONNECT response */
+      rv = server_send_connect_response(conn);
+      if (rv != 0) {
+        return rv;
+      }
+      break;
+
+    case NWEP_SERVER_STATE_AWAITING_CLIENT_AUTH:
+      /* Expecting AUTHENTICATE request */
+      if (msg.type != NWEP_MSG_REQUEST) {
+        return NWEP_ERR_PROTO_INVALID_MESSAGE;
+      }
+      rv = nwep_auth_request_parse(&conn->handshake, &msg);
+      if (rv != 0) {
+        return rv;
+      }
+      /* Send AUTHENTICATE response and complete */
+      rv = server_send_auth_response(conn);
+      if (rv != 0) {
+        return rv;
+      }
+      return complete_handshake(conn);
+
+    default:
+      return NWEP_ERR_INTERNAL_INVALID_STATE;
+    }
+  } else {
+    /* Client-side handshake processing */
+    switch (conn->handshake.state.client) {
+    case NWEP_CLIENT_STATE_WAIT_CONNECT_RESP:
+      /* Expecting CONNECT response */
+      if (msg.type != NWEP_MSG_RESPONSE) {
+        return NWEP_ERR_PROTO_INVALID_MESSAGE;
+      }
+      rv = nwep_connect_response_parse(&conn->handshake, &msg);
+      if (rv != 0) {
+        return rv;
+      }
+      /* Send AUTHENTICATE request */
+      rv = client_send_authenticate(conn);
+      if (rv != 0) {
+        return rv;
+      }
+      break;
+
+    case NWEP_CLIENT_STATE_WAIT_AUTH_RESP:
+      /* Expecting AUTHENTICATE response */
+      if (msg.type != NWEP_MSG_RESPONSE) {
+        return NWEP_ERR_PROTO_INVALID_MESSAGE;
+      }
+      rv = nwep_auth_response_parse(&conn->handshake, &msg);
+#ifdef NWEP_DEBUG
+      fprintf(stderr,
+              "[process_handshake] Client received AUTH response, parse rv=%d\n",
+              rv);
+#endif
+      if (rv != 0) {
+        return rv;
+      }
+      /* Handshake complete */
+      return complete_handshake(conn);
+
+    default:
+      return NWEP_ERR_INTERNAL_INVALID_STATE;
+    }
+  }
+
+  return 0;
+}
+
+/*
+ * ngtcp2 callback: Handshake completed (TLS level)
+ *
+ * This starts the WEB/1 application-level handshake.
  */
 static int handshake_completed_cb(ngtcp2_conn *conn, void *user_data) {
   nwep_conn *nconn = (nwep_conn *)user_data;
+  int64_t stream_id;
+  nwep_stream *stream;
+  int rv;
+
   (void)conn;
 
   nconn->state = NWEP_CONN_STATE_CONNECTED;
 
-  /* Call user's on_connect callback */
-  if (nconn->callbacks.on_connect != NULL) {
-    /* For now, pass NULL for peer identity - WEB/1 handshake not implemented yet */
-    return nconn->callbacks.on_connect(nconn, NULL, nconn->user_data);
+  if (nconn->is_server) {
+    /*
+     * Server: Initialize handshake state and wait for client's CONNECT.
+     * The handshake stream will be created when client opens stream 0.
+     */
+    rv = nwep_handshake_server_init(&nconn->handshake,
+                                    nconn->parent.server->keypair);
+    if (rv != 0) {
+      return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+    nconn->handshake.state.server = NWEP_SERVER_STATE_AWAITING_CONNECT;
+  } else {
+    /*
+     * Client: Initialize handshake, open stream 0, send CONNECT.
+     */
+    rv = nwep_handshake_client_init(&nconn->handshake,
+                                    nconn->parent.client->keypair,
+                                    &nconn->parent.client->target_url.addr.nodeid);
+    if (rv != 0) {
+      return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+
+    /* Open stream 0 for handshake */
+    rv = nwep_quic_open_stream(nconn, &stream_id);
+    if (rv != 0) {
+      return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+
+    stream = nwep_stream_new(nconn, stream_id);
+    if (stream == NULL) {
+      return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
+    stream->state = NWEP_STREAM_STATE_OPEN;
+    stream->is_handshake_stream = 1;
+    nwep_conn_add_stream(nconn, stream);
+    nconn->handshake_stream = stream;
+
+    /* Send CONNECT request */
+    rv = client_send_connect(nconn);
+    if (rv != 0) {
+      return NGTCP2_ERR_CALLBACK_FAILURE;
+    }
   }
 
   return 0;
+}
+
+#define RECV_BUF_INITIAL_SIZE 4096
+
+/*
+ * Buffer incoming data into stream->recv_buf
+ * Returns 0 on success, negative error code on failure
+ *
+ * ngtcp2 delivers data with absolute stream offsets. We track recv_offset
+ * which is the stream offset corresponding to recv_buf[0]. This allows us
+ * to process and consume data from the front of the buffer while still
+ * correctly positioning new incoming data.
+ */
+static int stream_buffer_recv(nwep_stream *stream, uint64_t offset,
+                              const uint8_t *data, size_t datalen) {
+  size_t buf_offset;
+  size_t required;
+  size_t new_cap;
+  uint8_t *new_buf;
+
+  if (datalen == 0) {
+    return 0;
+  }
+
+  /* Convert absolute stream offset to buffer-relative offset */
+  if (offset < stream->recv_offset) {
+    /* Data before what we've consumed - this shouldn't happen normally */
+    return 0;
+  }
+  buf_offset = (size_t)(offset - stream->recv_offset);
+
+  /* Calculate required buffer size based on relative offset */
+  required = buf_offset + datalen;
+
+  /* Grow buffer if needed */
+  if (required > stream->recv_cap) {
+    new_cap = stream->recv_cap == 0 ? RECV_BUF_INITIAL_SIZE : stream->recv_cap;
+    while (new_cap < required) {
+      new_cap *= 2;
+    }
+
+    new_buf = (uint8_t *)realloc(stream->recv_buf, new_cap);
+    if (new_buf == NULL) {
+      return NWEP_ERR_INTERNAL_NOMEM;
+    }
+
+    stream->recv_buf = new_buf;
+    stream->recv_cap = new_cap;
+  }
+
+  /* Copy data at the correct buffer position */
+  memcpy(stream->recv_buf + buf_offset, data, datalen);
+
+  /* Update recv_len to track highest received byte in buffer */
+  if (required > stream->recv_len) {
+    stream->recv_len = required;
+  }
+
+  return 0;
+}
+
+/*
+ * Try to process a complete message from the recv buffer
+ * Returns: 1 if message processed, 0 if incomplete, negative on error
+ */
+static int stream_try_process_message(nwep_stream *stream) {
+  uint32_t payload_len;
+  size_t msg_len;
+  uint8_t msg_type;
+  int rv;
+
+  /* Need at least 5 bytes: 4 byte length + 1 byte type */
+  if (stream->recv_len < 5) {
+    return 0; /* Not enough data yet */
+  }
+
+  /* Read payload length (big-endian) */
+  payload_len = ((uint32_t)stream->recv_buf[0] << 24) |
+                ((uint32_t)stream->recv_buf[1] << 16) |
+                ((uint32_t)stream->recv_buf[2] << 8) |
+                ((uint32_t)stream->recv_buf[3]);
+
+  msg_len = 4 + payload_len;
+
+  /* Check if we have the complete message */
+  if (stream->recv_len < msg_len) {
+    return 0; /* Not enough data yet */
+  }
+
+  /* We have a complete message, process it by type */
+  msg_type = stream->recv_buf[4];
+
+#ifdef NWEP_DEBUG
+  fprintf(stderr,
+          "[stream_try_process] msg_type=%d, msg_len=%zu, recv_len=%zu, "
+          "is_handshake=%d\n",
+          msg_type, msg_len, stream->recv_len, stream->is_handshake_stream);
+#endif
+
+  /* Route handshake stream messages to handshake processing */
+  if (stream->is_handshake_stream) {
+    rv = process_handshake_message(stream->conn, stream->recv_buf, msg_len);
+  } else {
+    switch (msg_type) {
+    case NWEP_MSG_NOTIFY:
+      rv = nwep_stream_process_notify(stream, stream->recv_buf, msg_len);
+      break;
+    case NWEP_MSG_REQUEST:
+      rv = nwep_stream_process_request(stream, stream->recv_buf, msg_len, 0);
+      break;
+    case NWEP_MSG_RESPONSE:
+      rv = nwep_stream_process_response(stream, stream->recv_buf, msg_len);
+      break;
+    case NWEP_MSG_STREAM:
+    default:
+      rv = nwep_stream_process_data(stream, stream->recv_buf + 5,
+                                    payload_len > 0 ? payload_len - 1 : 0);
+      break;
+    }
+  }
+
+  if (rv != 0) {
+#ifdef NWEP_DEBUG
+    fprintf(stderr, "[stream_try_process] processing returned error %d\n", rv);
+#endif
+    return rv;
+  }
+
+  /*
+   * Consume the processed message by advancing recv_offset and shifting
+   * the remaining data to the front of the buffer.
+   */
+  stream->recv_offset += msg_len;
+  if (stream->recv_len > msg_len) {
+    memmove(stream->recv_buf, stream->recv_buf + msg_len,
+            stream->recv_len - msg_len);
+    stream->recv_len -= msg_len;
+  } else {
+    stream->recv_len = 0;
+  }
+
+  return 1; /* Message processed */
 }
 
 /*
@@ -116,9 +540,9 @@ static int recv_stream_data_cb(ngtcp2_conn *conn, uint32_t flags,
   nwep_conn *nconn = (nwep_conn *)user_data;
   nwep_stream *stream = (nwep_stream *)stream_user_data;
   int fin = (flags & NGTCP2_STREAM_DATA_FLAG_FIN) != 0;
+  int rv;
 
   (void)conn;
-  (void)offset;
 
   if (stream == NULL) {
     stream = nwep_stream_find(nconn, stream_id);
@@ -133,61 +557,39 @@ static int recv_stream_data_cb(ngtcp2_conn *conn, uint32_t flags,
       }
       stream->is_server_initiated = ((stream_id % 4) == 1);
       stream->state = NWEP_STREAM_STATE_OPEN;
+
+      /*
+       * On server, the first client-initiated stream is the WEB/1 handshake stream.
+       * Client-initiated bidi streams have ID % 4 == 0.
+       */
+      if (nconn->is_server && !stream->is_server_initiated &&
+          nconn->handshake_stream == NULL) {
+        stream->is_handshake_stream = 1;
+        nconn->handshake_stream = stream;
+#ifdef NWEP_DEBUG
+        fprintf(stderr,
+                "[recv_stream_data] Marked stream %ld as handshake stream\n",
+                (long)stream_id);
+#endif
+      }
+
       nwep_conn_add_stream(nconn, stream);
     }
   }
 
   if (datalen > 0) {
-    int rv = 0;
-    uint8_t msg_type;
-
-    /*
-     * Route first incoming message by type (offset 4 in wire format).
-     * Check recv_len == 0 to determine if this is the first received data.
-     * Note: stream->msg.type represents what WE sent, not what we're receiving.
-     */
-    if (datalen >= 5 && stream->recv_len == 0) {
-      msg_type = data[4];
-
-#ifdef NWEP_DEBUG
-      fprintf(stderr,
-              "[recv_stream_data] routing msg_type=%d, datalen=%zu, "
-              "stream->msg.type=%d\n",
-              msg_type, datalen, stream->msg.type);
-#endif
-
-      switch (msg_type) {
-      case NWEP_MSG_NOTIFY:
-        rv = nwep_stream_process_notify(stream, data, datalen);
-        break;
-      case NWEP_MSG_REQUEST:
-        rv = nwep_stream_process_request(stream, data, datalen, 0);
-        break;
-      case NWEP_MSG_RESPONSE:
-        rv = nwep_stream_process_response(stream, data, datalen);
-        break;
-      case NWEP_MSG_STREAM:
-      default:
-        rv = nwep_stream_process_data(stream, data, datalen);
-        break;
-      }
-    } else {
-#ifdef NWEP_DEBUG
-      fprintf(stderr,
-              "[recv_stream_data] fallback to process_data, datalen=%zu, "
-              "recv_len=%zu\n",
-              datalen, stream->recv_len);
-#endif
-      rv = nwep_stream_process_data(stream, data, datalen);
+    /* Buffer incoming data */
+    rv = stream_buffer_recv(stream, offset, data, datalen);
+    if (rv != 0) {
+      return NGTCP2_ERR_CALLBACK_FAILURE;
     }
 
-#ifdef NWEP_DEBUG
-    if (rv != 0) {
-      fprintf(stderr, "[recv_stream_data] processing returned error %d\n", rv);
+    /* Try to process complete messages */
+    while ((rv = stream_try_process_message(stream)) > 0) {
+      /* Keep processing while we have complete messages */
     }
-#endif
 
-    if (rv != 0) {
+    if (rv < 0) {
       return NGTCP2_ERR_CALLBACK_FAILURE;
     }
   }
@@ -217,6 +619,20 @@ static int stream_open_cb(ngtcp2_conn *conn, int64_t stream_id,
   /* Server-initiated streams have ID % 4 == 1 */
   stream->is_server_initiated = ((stream_id % 4) == 1);
   stream->state = NWEP_STREAM_STATE_OPEN;
+
+  /*
+   * On server, the first client-initiated stream is the WEB/1 handshake stream.
+   * Client-initiated bidi streams have ID % 4 == 0.
+   */
+  if (nconn->is_server && !stream->is_server_initiated &&
+      nconn->handshake_stream == NULL) {
+    stream->is_handshake_stream = 1;
+    nconn->handshake_stream = stream;
+#ifdef NWEP_DEBUG
+    fprintf(stderr, "[stream_open_cb] Marked stream %ld as handshake stream\n",
+            (long)stream_id);
+#endif
+  }
 
   nwep_conn_add_stream(nconn, stream);
 
@@ -252,19 +668,61 @@ static int stream_close_cb(ngtcp2_conn *conn, uint32_t flags,
 
 /*
  * ngtcp2 callback: Acknowledge stream data offset
+ *
+ * Called when the peer acknowledges receipt of stream data.
+ * We use this to free acknowledged portions of the send buffer.
  */
 static int acked_stream_data_offset_cb(ngtcp2_conn *conn, int64_t stream_id,
                                        uint64_t offset, uint64_t datalen,
                                        void *user_data,
                                        void *stream_user_data) {
+  nwep_conn *nconn = (nwep_conn *)user_data;
+  nwep_stream *stream = (nwep_stream *)stream_user_data;
+  uint64_t acked_end;
+
   (void)conn;
   (void)stream_id;
-  (void)offset;
-  (void)datalen;
-  (void)user_data;
-  (void)stream_user_data;
 
-  /* Could be used to free acknowledged data buffers */
+  if (stream == NULL) {
+    stream = nwep_stream_find(nconn, stream_id);
+    if (stream == NULL) {
+      return 0; /* Stream already closed, nothing to do */
+    }
+  }
+
+  /* Calculate the end of the acknowledged range */
+  acked_end = offset + datalen;
+
+#ifdef NWEP_DEBUG
+  fprintf(stderr,
+          "[acked_stream_data] stream_id=%ld, offset=%lu, datalen=%lu, "
+          "acked_end=%lu, send_offset=%zu\n",
+          (long)stream_id, (unsigned long)offset, (unsigned long)datalen,
+          (unsigned long)acked_end, stream->send_offset);
+#endif
+
+  /*
+   * If all sent data has been acknowledged (acked_end >= send_offset),
+   * we can compact the send buffer by removing acknowledged data.
+   *
+   * Note: QUIC can acknowledge data out of order, but ngtcp2 delivers
+   * ACKs in order per stream, so acked_end grows monotonically.
+   */
+  if (acked_end >= stream->send_offset && stream->send_offset > 0) {
+    /* All data we've sent so far has been acknowledged */
+    if (stream->send_len > stream->send_offset) {
+      /* There's unsent data remaining - shift it to front */
+      size_t remaining = stream->send_len - stream->send_offset;
+      memmove(stream->send_buf, stream->send_buf + stream->send_offset,
+              remaining);
+      stream->send_len = remaining;
+    } else {
+      /* All data sent and acknowledged - reset buffer */
+      stream->send_len = 0;
+    }
+    stream->send_offset = 0;
+  }
+
   return 0;
 }
 

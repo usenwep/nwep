@@ -283,14 +283,16 @@ void nwep_stream_close(nwep_stream *stream, int error) {
     return;
   }
 
+  if (stream->state == NWEP_STREAM_STATE_CLOSED) {
+    return; /* Already closed */
+  }
+
   stream->state = NWEP_STREAM_STATE_CLOSED;
 
-  /*
-   * Note: Stream state is updated. RESET_STREAM would be sent via
-   * ngtcp2_conn_shutdown_stream() with the application error code.
-   */
-
-  (void)error;
+  /* Send RESET_STREAM via ngtcp2 to notify the peer */
+  if (stream->conn != NULL && stream->conn->qconn != NULL) {
+    nwep_quic_shutdown_stream(stream->conn, stream->id, (uint64_t)error);
+  }
 }
 
 int64_t nwep_stream_get_id(const nwep_stream *stream) {
