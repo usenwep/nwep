@@ -343,6 +343,22 @@ if(NWEP_BUILD_TESTS)
       OpenSSL::Crypto
       blst::blst
   )
+
+  # Integration tests (end-to-end with libuv)
+  add_executable(test_integration tests/test_integration.c)
+  target_include_directories(test_integration PRIVATE ${LIBUV_INCLUDE_DIRS})
+  target_link_libraries(test_integration
+    PRIVATE
+      nwep
+      ngtcp2::ngtcp2_crypto_quictls
+      ngtcp2::ngtcp2
+      OpenSSL::SSL
+      OpenSSL::Crypto
+      blst::blst
+      ${LIBUV_LIBRARIES}
+  )
+  target_link_directories(test_integration PRIVATE ${LIBUV_LIBRARY_DIRS})
+  add_test(NAME integration COMMAND test_integration)
 endif()
 
 # Print configuration summary

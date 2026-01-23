@@ -665,10 +665,12 @@ int nwep_notify_parse(nwep_notify *notify, const nwep_msg *msg) {
     return NWEP_ERR_PROTO_MISSING_HEADER;
   }
   notify->event = (const char *)hdr->value;
+  notify->event_len = hdr->value_len;
 
   hdr = nwep_msg_find_header(msg, NWEP_HDR_PATH);
   if (hdr != NULL && hdr->value_len > 0) {
     notify->path = (const char *)hdr->value;
+    notify->path_len = hdr->value_len;
   }
 
   hdr = nwep_msg_find_header(msg, NWEP_HDR_NOTIFY_ID);

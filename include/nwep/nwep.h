@@ -2853,7 +2853,9 @@ typedef struct nwep_response {
  */
 typedef struct nwep_notify {
   const char *event;
+  size_t event_len;
   const char *path;
+  size_t path_len;
   uint8_t notify_id[NWEP_NOTIFY_ID_LEN];
   int has_notify_id;
   const nwep_header *headers;
