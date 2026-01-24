@@ -1,0 +1,313 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.arch }}, ${{ matrix.compiler }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x86_64 with GCC
+          - runner: ubuntu-24.04
+            arch: x86_64
+            compiler: gcc
+            cc: gcc
+            cxx: g++
+
+          # x86_64 with Clang
+          - runner: ubuntu-24.04
+            arch: x86_64
+            compiler: clang
+            cc: clang
+            cxx: clang++
+
+          # ARM64 with GCC (GitHub-hosted ARM64 runner)
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            compiler: gcc
+            cc: gcc
+            cxx: g++
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libuv1-dev
+
+      - name: Build blst
+        run: |
+          cd third_party/blst
+          ./build.sh
+
+      - name: Build all
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          ./build.sh
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure
+
+  mingw-cross:
+    name: MinGW Cross-Compile (${{ matrix.arch }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            host: x86_64-w64-mingw32
+            packages: gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64
+            toolchain: toolchain-mingw64.cmake
+            openssl_target: mingw64
+
+          - arch: x86
+            host: i686-w64-mingw32
+            packages: gcc-mingw-w64-i686 g++-mingw-w64-i686
+            toolchain: toolchain-mingw32.cmake
+            openssl_target: mingw
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install MinGW toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build ${{ matrix.packages }}
+
+      - name: Build blst for Windows
+        run: |
+          cd third_party/blst
+          CC=${{ matrix.host }}-gcc ./build.sh
+
+      - name: Build quictls for Windows
+        run: |
+          mkdir -p third_party/quictls-build-cross
+          cd third_party/quictls-build-cross
+          ../quictls/Configure \
+            --prefix=${{ github.workspace }}/third_party/quictls-install-cross \
+            --openssldir=${{ github.workspace }}/third_party/quictls-install-cross \
+            --cross-compile-prefix=${{ matrix.host }}- \
+            no-shared no-tests enable-tls1_3 \
+            ${{ matrix.openssl_target }}
+          make -j$(nproc)
+          make install_sw
+          # Create lib symlink if needed (mingw64 uses lib64)
+          cd ../quictls-install-cross
+          [ -d lib64 ] && [ ! -e lib ] && ln -s lib64 lib || true
+
+      - name: Create FindOpenSSL module for cross-compilation
+        run: |
+          mkdir -p cmake_modules
+          cat > cmake_modules/FindOpenSSL.cmake << 'EOF'
+          if(NOT OPENSSL_ROOT_DIR)
+            message(FATAL_ERROR "OPENSSL_ROOT_DIR must be set")
+          endif()
+          set(OPENSSL_FOUND TRUE)
+          set(OPENSSL_INCLUDE_DIR "${OPENSSL_ROOT_DIR}/include" CACHE PATH "")
+          if(EXISTS "${OPENSSL_ROOT_DIR}/lib/libssl.a")
+            set(_ssl "${OPENSSL_ROOT_DIR}/lib/libssl.a")
+            set(_crypto "${OPENSSL_ROOT_DIR}/lib/libcrypto.a")
+          elseif(EXISTS "${OPENSSL_ROOT_DIR}/lib64/libssl.a")
+            set(_ssl "${OPENSSL_ROOT_DIR}/lib64/libssl.a")
+            set(_crypto "${OPENSSL_ROOT_DIR}/lib64/libcrypto.a")
+          endif()
+          set(OPENSSL_SSL_LIBRARY "${_ssl}" CACHE FILEPATH "")
+          set(OPENSSL_CRYPTO_LIBRARY "${_crypto}" CACHE FILEPATH "")
+          set(OPENSSL_LIBRARIES "${_ssl};${_crypto}")
+          file(STRINGS "${OPENSSL_INCLUDE_DIR}/openssl/opensslv.h" _v REGEX "OPENSSL_VERSION_STR")
+          string(REGEX REPLACE ".*\"([0-9.]+).*" "\\1" OPENSSL_VERSION "${_v}")
+          if(NOT TARGET OpenSSL::Crypto)
+            add_library(OpenSSL::Crypto STATIC IMPORTED)
+            set_target_properties(OpenSSL::Crypto PROPERTIES
+              IMPORTED_LOCATION "${OPENSSL_CRYPTO_LIBRARY}"
+              INTERFACE_INCLUDE_DIRECTORIES "${OPENSSL_INCLUDE_DIR}")
+            if(WIN32)
+              set_property(TARGET OpenSSL::Crypto APPEND PROPERTY INTERFACE_LINK_LIBRARIES ws2_32 crypt32)
+            endif()
+          endif()
+          if(NOT TARGET OpenSSL::SSL)
+            add_library(OpenSSL::SSL STATIC IMPORTED)
+            set_target_properties(OpenSSL::SSL PROPERTIES
+              IMPORTED_LOCATION "${OPENSSL_SSL_LIBRARY}"
+              INTERFACE_INCLUDE_DIRECTORIES "${OPENSSL_INCLUDE_DIR}"
+              INTERFACE_LINK_LIBRARIES OpenSSL::Crypto)
+          endif()
+          include(FindPackageHandleStandardArgs)
+          find_package_handle_standard_args(OpenSSL REQUIRED_VARS OPENSSL_SSL_LIBRARY OPENSSL_CRYPTO_LIBRARY OPENSSL_INCLUDE_DIR VERSION_VAR OPENSSL_VERSION)
+          EOF
+
+      - name: Build ngtcp2 for Windows
+        run: |
+          mkdir -p third_party/ngtcp2-build-cross
+          cd third_party/ngtcp2-build-cross
+          cmake ../ngtcp2 \
+            -DCMAKE_MODULE_PATH=${{ github.workspace }}/cmake_modules \
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/cmake/${{ matrix.toolchain }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DOPENSSL_ROOT_DIR=${{ github.workspace }}/third_party/quictls-install-cross \
+            -DENABLE_SHARED_LIB=OFF \
+            -DENABLE_STATIC_LIB=ON \
+            -DENABLE_OPENSSL=ON \
+            -DENABLE_GNUTLS=OFF \
+            -DENABLE_BORINGSSL=OFF \
+            -DENABLE_PICOTLS=OFF \
+            -DENABLE_WOLFSSL=OFF \
+            -DBUILD_TESTING=OFF
+          make -j$(nproc)
+
+      - name: Build nwep for Windows
+        run: |
+          mkdir -p build
+          cd build
+          cmake .. \
+            -DCMAKE_MODULE_PATH=${{ github.workspace }}/cmake_modules \
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/cmake/${{ matrix.toolchain }} \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DQUICTLS_ROOT=${{ github.workspace }}/third_party/quictls-install-cross \
+            -DOPENSSL_ROOT_DIR=${{ github.workspace }}/third_party/quictls-install-cross \
+            -DNGTCP2_BUILD=${{ github.workspace }}/third_party/ngtcp2-build-cross \
+            -DNWEP_BUILD_TESTS=OFF
+          make -j$(nproc)
+
+      - name: Verify build
+        run: |
+          file build/libnwep.a
+          test -f build/libnwep.a
+
+  windows-msvc:
+    name: Windows (MSVC, ${{ matrix.arch }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            platform: x64
+            openssl_target: VC-WIN64A
+          - arch: x86
+            platform: Win32
+            openssl_target: VC-WIN32
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Install NASM
+        uses: ilammy/setup-nasm@v1
+
+      - name: Install Strawberry Perl
+        run: choco install strawberryperl --no-progress
+
+      - name: Build quictls
+        shell: cmd
+        run: |
+          mkdir third_party\quictls-build
+          cd third_party\quictls-build
+          perl ..\quictls\Configure ^
+            --prefix=%GITHUB_WORKSPACE%\third_party\quictls-install ^
+            --openssldir=%GITHUB_WORKSPACE%\third_party\quictls-install ^
+            no-shared no-tests enable-tls1_3 ^
+            ${{ matrix.openssl_target }}
+          nmake
+          nmake install_sw
+
+      - name: Build ngtcp2
+        shell: cmd
+        run: |
+          mkdir third_party\ngtcp2-build
+          cd third_party\ngtcp2-build
+          cmake ..\ngtcp2 ^
+            -G "Visual Studio 17 2022" -A ${{ matrix.platform }} ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DENABLE_SHARED_LIB=OFF ^
+            -DENABLE_STATIC_LIB=ON ^
+            -DENABLE_OPENSSL=ON ^
+            -DENABLE_GNUTLS=OFF ^
+            -DENABLE_BORINGSSL=OFF ^
+            -DENABLE_PICOTLS=OFF ^
+            -DENABLE_WOLFSSL=OFF ^
+            -DOPENSSL_ROOT_DIR=%GITHUB_WORKSPACE%\third_party\quictls-install ^
+            -DBUILD_TESTING=OFF
+          cmake --build . --config Release
+
+      - name: Build blst
+        shell: cmd
+        run: |
+          cd third_party\blst
+          call build.bat
+
+      - name: Build nwep
+        shell: cmd
+        run: |
+          mkdir build
+          cd build
+          cmake .. ^
+            -G "Visual Studio 17 2022" -A ${{ matrix.platform }} ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DQUICTLS_ROOT=%GITHUB_WORKSPACE%\third_party\quictls-install ^
+            -DNGTCP2_BUILD=%GITHUB_WORKSPACE%\third_party\ngtcp2-build ^
+            -DNWEP_BUILD_TESTS=OFF
+          cmake --build . --config Release
+
+      - name: Verify build
+        shell: cmd
+        run: |
+          dir build\Release\nwep.lib
+          if not exist build\Release\nwep.lib exit /b 1
+
+  # Verify clean build from scratch
+  clean-build:
+    name: Clean Build Test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build libuv1-dev
+
+      - name: Build blst
+        run: |
+          cd third_party/blst
+          ./build.sh
+
+      - name: Clean build from scratch
+        run: |
+          ./build.sh clean-all
+          ./build.sh
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure
+
+      - name: Verify library output
+        run: |
+          test -f build/libnwep.a
+          echo "Library built successfully"

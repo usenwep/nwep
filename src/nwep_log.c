@@ -24,9 +24,15 @@
  */
 
 /* Enable POSIX features for clock_gettime */
-#if !defined(_POSIX_C_SOURCE) || _POSIX_C_SOURCE < 199309L
-#  undef _POSIX_C_SOURCE
-#  define _POSIX_C_SOURCE 199309L
+#if !defined(_WIN32)
+#  if !defined(_POSIX_C_SOURCE) || _POSIX_C_SOURCE < 199309L
+#    undef _POSIX_C_SOURCE
+#    define _POSIX_C_SOURCE 199309L
+#  endif
+#endif
+
+#ifdef HAVE_CONFIG_H
+#  include "config.h"
 #endif
 
 #include <nwep/nwep.h>
@@ -35,6 +41,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <windows.h>
+#endif
 
 /*
  * Global logger configuration
@@ -167,14 +180,51 @@ static void format_trace_id(char *dest, size_t destlen,
  * Get current timestamp in nanoseconds since epoch
  */
 static uint64_t get_timestamp_ns(void) {
-#if defined(__linux__) || defined(__APPLE__)
+#if defined(_WIN32)
+  /* Windows: use QueryPerformanceCounter for high resolution */
+  static LARGE_INTEGER frequency = {0};
+  static LARGE_INTEGER start_counter = {0};
+  static uint64_t start_time_ns = 0;
+  static int initialized = 0;
+
+  if (!initialized) {
+    FILETIME ft;
+    ULARGE_INTEGER uli;
+
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&start_counter);
+
+    /* Get current time in 100-nanosecond intervals since Jan 1, 1601 */
+    GetSystemTimeAsFileTime(&ft);
+    uli.LowPart = ft.dwLowDateTime;
+    uli.HighPart = ft.dwHighDateTime;
+
+    /* Convert to nanoseconds since Unix epoch (Jan 1, 1970) */
+    /* 11644473600 seconds between 1601 and 1970 */
+    start_time_ns = (uli.QuadPart - 116444736000000000ULL) * 100ULL;
+    initialized = 1;
+  }
+
+  {
+    LARGE_INTEGER counter;
+    uint64_t elapsed_ns;
+
+    QueryPerformanceCounter(&counter);
+    elapsed_ns = (uint64_t)((counter.QuadPart - start_counter.QuadPart) *
+                            1000000000ULL / frequency.QuadPart);
+    return start_time_ns + elapsed_ns;
+  }
+#elif defined(HAVE_CLOCK_GETTIME) || defined(__linux__) || defined(__APPLE__)
   struct timespec ts;
   if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
     return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
   }
-#endif
   /* Fallback to seconds precision */
   return (uint64_t)time(NULL) * 1000000000ULL;
+#else
+  /* Fallback to seconds precision */
+  return (uint64_t)time(NULL) * 1000000000ULL;
+#endif
 }
 
 /*
@@ -182,6 +232,7 @@ static uint64_t get_timestamp_ns(void) {
  */
 static void get_timestamp(char *dest, size_t destlen) {
   time_t now;
+  struct tm tm_buf;
   struct tm *tm_info;
 
   if (dest == NULL || destlen < 25) {
@@ -189,8 +240,27 @@ static void get_timestamp(char *dest, size_t destlen) {
   }
 
   time(&now);
+#if defined(_MSC_VER) || defined(__MINGW32__) || defined(__MINGW64__)
+  /* MSVC and MinGW use reversed argument order: (tm*, time_t*) */
+  gmtime_s(&tm_buf, &now);
+  tm_info = &tm_buf;
+#elif defined(__STDC_LIB_EXT1__) || defined(__STDC_SECURE_LIB__)
+  /* C11 Annex K uses: (time_t*, tm*) */
+  gmtime_s(&now, &tm_buf);
+  tm_info = &tm_buf;
+#else
   tm_info = gmtime(&now);
-  strftime(dest, destlen, "%Y-%m-%dT%H:%M:%SZ", tm_info);
+  if (tm_info != NULL) {
+    tm_buf = *tm_info;
+    tm_info = &tm_buf;
+  }
+#endif
+
+  if (tm_info != NULL) {
+    strftime(dest, destlen, "%Y-%m-%dT%H:%M:%SZ", tm_info);
+  } else {
+    dest[0] = '\0';
+  }
 }
 
 void nwep_log_write(nwep_log_level level, const uint8_t *trace_id,

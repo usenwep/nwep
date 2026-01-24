@@ -8,9 +8,13 @@ set(NWEP_VERSION "${NWEP_VERSION_MAJOR}.${NWEP_VERSION_MINOR}.${NWEP_VERSION_PAT
 
 project(nwep VERSION ${NWEP_VERSION} LANGUAGES C)
 
+# CMake module path
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 # Options
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(NWEP_BUILD_TESTS "Build tests" ON)
+option(NWEP_ENABLE_WERROR "Treat warnings as errors" OFF)
 
 # Set C standard
 set(CMAKE_C_STANDARD 11)
@@ -20,13 +24,72 @@ set(CMAKE_C_EXTENSIONS OFF)
 # Generate compile_commands.json for IDE support
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+# Include feature detection modules
+include(CheckIncludeFile)
+include(CheckSymbolExists)
+include(CheckFunctionExists)
+
+# Detect platform headers
+check_include_file(arpa/inet.h HAVE_ARPA_INET_H)
+check_include_file(netinet/in.h HAVE_NETINET_IN_H)
+check_include_file(sys/socket.h HAVE_SYS_SOCKET_H)
+check_include_file(unistd.h HAVE_UNISTD_H)
+check_include_file(windows.h HAVE_WINDOWS_H)
+check_include_file(winsock2.h HAVE_WINSOCK2_H)
+
+# Detect time functions
+check_symbol_exists(clock_gettime time.h HAVE_CLOCK_GETTIME)
+check_symbol_exists(gettimeofday sys/time.h HAVE_GETTIMEOFDAY)
+if(WIN32)
+  check_symbol_exists(QueryPerformanceCounter windows.h HAVE_QUERY_PERFORMANCE_COUNTER)
+endif()
+
+# Detect memory functions
+check_symbol_exists(explicit_bzero string.h HAVE_EXPLICIT_BZERO)
+check_symbol_exists(explicit_memset string.h HAVE_EXPLICIT_MEMSET)
+check_symbol_exists(memset_s string.h HAVE_MEMSET_S)
+if(WIN32)
+  check_symbol_exists(SecureZeroMemory windows.h HAVE_SECURE_ZERO_MEMORY)
+endif()
+
+# Generate config.h
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/config.h.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/config.h"
+  @ONLY
+)
+
 # Compiler flags
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
   if(NOT BUILD_SHARED_LIBS)
     add_compile_options(-fvisibility=hidden)
   endif()
+  if(NWEP_ENABLE_WERROR)
+    add_compile_options(-Werror)
+  endif()
+elseif(MSVC)
+  # MSVC warning level 4
+  add_compile_options(/W4)
+  # Disable noisy warnings
+  add_compile_options(
+    /wd4100  # unreferenced formal parameter
+    /wd4127  # conditional expression is constant
+    /wd4244  # conversion from 'type1' to 'type2', possible loss of data
+    /wd4267  # conversion from 'size_t' to 'type', possible loss of data
+    /wd4706  # assignment within conditional expression
+  )
+  # Enable parallel compilation
+  add_compile_options(/MP)
+  # Use secure CRT functions
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+  if(NWEP_ENABLE_WERROR)
+    add_compile_options(/WX)
+  endif()
 endif()
+
+# Include picky warnings module if available
+include(PickyWarningsC OPTIONAL)
 
 # Generate version.h from template
 configure_file(
@@ -35,11 +98,19 @@ configure_file(
   @ONLY
 )
 
-# Third-party paths
-set(QUICTLS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/quictls-install")
-set(NGTCP2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ngtcp2")
-set(NGTCP2_BUILD "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ngtcp2-build")
-set(BLST_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/blst")
+# Third-party paths (can be overridden via -D options for cross-compilation)
+if(NOT QUICTLS_ROOT)
+  set(QUICTLS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/quictls-install")
+endif()
+if(NOT NGTCP2_ROOT)
+  set(NGTCP2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ngtcp2")
+endif()
+if(NOT NGTCP2_BUILD)
+  set(NGTCP2_BUILD "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ngtcp2-build")
+endif()
+if(NOT BLST_ROOT)
+  set(BLST_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/blst")
+endif()
 
 # Find OpenSSL (quictls)
 set(OPENSSL_ROOT_DIR "${QUICTLS_ROOT}")
@@ -47,17 +118,56 @@ set(OPENSSL_USE_STATIC_LIBS TRUE)
 find_package(OpenSSL REQUIRED)
 
 # ngtcp2 library paths
-set(NGTCP2_INCLUDE_DIR "${NGTCP2_ROOT}/lib/includes")
-set(NGTCP2_CRYPTO_INCLUDE_DIR "${NGTCP2_ROOT}/crypto/includes")
-set(NGTCP2_LIBRARY "${NGTCP2_BUILD}/lib/libngtcp2.a")
-set(NGTCP2_CRYPTO_LIBRARY "${NGTCP2_BUILD}/crypto/quictls/libngtcp2_crypto_quictls.a")
+# Include both source and build directories (version.h is generated in build)
+set(NGTCP2_INCLUDE_DIR "${NGTCP2_ROOT}/lib/includes;${NGTCP2_BUILD}/lib/includes")
+set(NGTCP2_CRYPTO_INCLUDE_DIR "${NGTCP2_ROOT}/crypto/includes;${NGTCP2_BUILD}/crypto/includes")
+
+# Find ngtcp2 library (support both Unix .a and Windows .lib)
+if(WIN32)
+  set(NGTCP2_LIBRARY_CANDIDATES
+    "${NGTCP2_BUILD}/lib/Release/ngtcp2.lib"
+    "${NGTCP2_BUILD}/lib/Release/ngtcp2_static.lib"
+    "${NGTCP2_BUILD}/lib/ngtcp2.lib"
+    "${NGTCP2_BUILD}/lib/ngtcp2_static.lib"
+    "${NGTCP2_BUILD}/lib/libngtcp2.lib"
+    "${NGTCP2_BUILD}/lib/libngtcp2.a"
+  )
+  set(NGTCP2_CRYPTO_LIBRARY_CANDIDATES
+    "${NGTCP2_BUILD}/crypto/quictls/Release/ngtcp2_crypto_quictls.lib"
+    "${NGTCP2_BUILD}/crypto/quictls/Release/ngtcp2_crypto_quictls_static.lib"
+    "${NGTCP2_BUILD}/crypto/quictls/ngtcp2_crypto_quictls.lib"
+    "${NGTCP2_BUILD}/crypto/quictls/ngtcp2_crypto_quictls_static.lib"
+    "${NGTCP2_BUILD}/crypto/quictls/libngtcp2_crypto_quictls.lib"
+    "${NGTCP2_BUILD}/crypto/quictls/libngtcp2_crypto_quictls.a"
+  )
+else()
+  set(NGTCP2_LIBRARY_CANDIDATES "${NGTCP2_BUILD}/lib/libngtcp2.a")
+  set(NGTCP2_CRYPTO_LIBRARY_CANDIDATES "${NGTCP2_BUILD}/crypto/quictls/libngtcp2_crypto_quictls.a")
+endif()
+
+# Find first existing library
+set(NGTCP2_LIBRARY "")
+foreach(lib ${NGTCP2_LIBRARY_CANDIDATES})
+  if(EXISTS "${lib}")
+    set(NGTCP2_LIBRARY "${lib}")
+    break()
+  endif()
+endforeach()
+
+set(NGTCP2_CRYPTO_LIBRARY "")
+foreach(lib ${NGTCP2_CRYPTO_LIBRARY_CANDIDATES})
+  if(EXISTS "${lib}")
+    set(NGTCP2_CRYPTO_LIBRARY "${lib}")
+    break()
+  endif()
+endforeach()
 
 # Check that ngtcp2 is built
-if(NOT EXISTS "${NGTCP2_LIBRARY}")
-  message(FATAL_ERROR "ngtcp2 library not found at ${NGTCP2_LIBRARY}. Run build.sh first.")
+if(NOT NGTCP2_LIBRARY)
+  message(FATAL_ERROR "ngtcp2 library not found. Run build.sh first.")
 endif()
-if(NOT EXISTS "${NGTCP2_CRYPTO_LIBRARY}")
-  message(FATAL_ERROR "ngtcp2_crypto_quictls library not found at ${NGTCP2_CRYPTO_LIBRARY}. Run build.sh first.")
+if(NOT NGTCP2_CRYPTO_LIBRARY)
+  message(FATAL_ERROR "ngtcp2_crypto_quictls library not found. Run build.sh first.")
 endif()
 
 # Create imported targets for ngtcp2
@@ -75,11 +185,30 @@ set_target_properties(ngtcp2::ngtcp2_crypto_quictls PROPERTIES
 
 # blst library paths
 set(BLST_INCLUDE_DIR "${BLST_ROOT}/bindings")
-set(BLST_LIBRARY "${BLST_ROOT}/libblst.a")
+
+# Find blst library (support both Unix .a and Windows .lib)
+if(WIN32)
+  set(BLST_LIBRARY_CANDIDATES
+    "${BLST_ROOT}/blst.lib"
+    "${BLST_ROOT}/libblst.lib"
+    "${BLST_ROOT}/libblst.a"
+  )
+else()
+  set(BLST_LIBRARY_CANDIDATES "${BLST_ROOT}/libblst.a")
+endif()
+
+# Find first existing library
+set(BLST_LIBRARY "")
+foreach(lib ${BLST_LIBRARY_CANDIDATES})
+  if(EXISTS "${lib}")
+    set(BLST_LIBRARY "${lib}")
+    break()
+  endif()
+endforeach()
 
 # Check that blst is built
-if(NOT EXISTS "${BLST_LIBRARY}")
-  message(FATAL_ERROR "blst library not found at ${BLST_LIBRARY}. Run third_party/blst/build.sh first.")
+if(NOT BLST_LIBRARY)
+  message(FATAL_ERROR "blst library not found. Run third_party/blst/build.sh first.")
 endif()
 
 # Create imported target for blst
@@ -118,8 +247,8 @@ set(NWEP_SOURCES
 # Create the library
 add_library(nwep ${NWEP_SOURCES})
 
-# Define BUILDING_NWEP for visibility macros
-target_compile_definitions(nwep PRIVATE BUILDING_NWEP)
+# Define BUILDING_NWEP for visibility macros and HAVE_CONFIG_H
+target_compile_definitions(nwep PRIVATE BUILDING_NWEP HAVE_CONFIG_H)
 
 # Static lib definition
 if(NOT BUILD_SHARED_LIBS)
@@ -134,6 +263,7 @@ target_include_directories(nwep
     $<INSTALL_INTERFACE:include>
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_BINARY_DIR}  # for config.h
 )
 
 # Link dependencies
@@ -145,6 +275,16 @@ target_link_libraries(nwep
     OpenSSL::Crypto
     blst::blst
 )
+
+# Windows socket libraries
+if(WIN32)
+  target_link_libraries(nwep
+    PRIVATE
+      ws2_32
+      crypt32
+      bcrypt
+  )
+endif()
 
 # Set library properties
 set_target_properties(nwep PROPERTIES
