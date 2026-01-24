@@ -251,7 +251,9 @@ build_quictls() {
     log_info "Cross-compiler prefix: $cross_prefix"
   fi
 
-  if [ -f "$QUICTLS_INSTALL/lib/libssl.a" ] && [ -f "$QUICTLS_INSTALL/lib/libcrypto.a" ]; then
+  # Check for both lib and lib64 (mingw64 uses lib64)
+  if { [ -f "$QUICTLS_INSTALL/lib/libssl.a" ] && [ -f "$QUICTLS_INSTALL/lib/libcrypto.a" ]; } || \
+     { [ -f "$QUICTLS_INSTALL/lib64/libssl.a" ] && [ -f "$QUICTLS_INSTALL/lib64/libcrypto.a" ]; }; then
     log_info "quictls already built, skipping..."
     return 0
   fi
@@ -284,6 +286,12 @@ build_quictls() {
 
   make -j"$JOBS"
   make install_sw
+
+  # Create lib symlink if mingw64 installed to lib64
+  cd "$QUICTLS_INSTALL"
+  if [ -d lib64 ] && [ ! -e lib ]; then
+    ln -s lib64 lib
+  fi
 
   log_info "quictls built successfully"
 }
@@ -320,7 +328,7 @@ build_ngtcp2() {
     -DOPENSSL_USE_STATIC_LIBS=ON
   )
 
-  # Add toolchain file for cross-compilation
+  # Add toolchain file and custom modules for cross-compilation
   if [ -n "${HOST:-}" ]; then
     local toolchain_file=""
     case "$HOST" in
@@ -337,6 +345,8 @@ build_ngtcp2() {
     if [ -n "$toolchain_file" ] && [ -f "$toolchain_file" ]; then
       cmake_args+=(-DCMAKE_TOOLCHAIN_FILE="$toolchain_file")
     fi
+    # Use custom FindOpenSSL module for cross-compilation
+    cmake_args+=(-DCMAKE_MODULE_PATH="$SCRIPT_DIR/cmake")
   fi
 
   cmake "$NGTCP2_SRC" "${cmake_args[@]}"
@@ -377,6 +387,8 @@ build_nwep() {
     if [ -n "$toolchain_file" ] && [ -f "$toolchain_file" ]; then
       cmake_args+=(-DCMAKE_TOOLCHAIN_FILE="$toolchain_file")
     fi
+    # Disable tests when cross-compiling (they need host libuv)
+    cmake_args+=(-DNWEP_BUILD_TESTS=OFF)
   fi
 
   cmake "$SCRIPT_DIR" "${cmake_args[@]}"

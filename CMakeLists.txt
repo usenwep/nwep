@@ -255,6 +255,9 @@ if(NOT BUILD_SHARED_LIBS)
   target_compile_definitions(nwep PUBLIC NWEP_STATICLIB)
 endif()
 
+# ngtcp2 static lib definition (required on Windows to avoid dllimport)
+target_compile_definitions(nwep PRIVATE NGTCP2_STATICLIB)
+
 # Include directories
 target_include_directories(nwep
   PUBLIC
