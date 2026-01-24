@@ -192,18 +192,8 @@ jobs:
           test -f build/libnwep.a
 
   windows-msvc:
-    name: Windows (MSVC, ${{ matrix.arch }})
+    name: Windows (MSVC, x64)
     runs-on: windows-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x64
-            platform: x64
-            openssl_target: VC-WIN64A
-          - arch: x86
-            platform: Win32
-            openssl_target: VC-WIN32
 
     steps:
       - uses: actions/checkout@v4
@@ -213,7 +203,7 @@ jobs:
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
-          arch: ${{ matrix.arch }}
+          arch: x64
 
       - name: Install NASM
         uses: ilammy/setup-nasm@v1
@@ -230,7 +220,7 @@ jobs:
             --prefix=%GITHUB_WORKSPACE%\third_party\quictls-install ^
             --openssldir=%GITHUB_WORKSPACE%\third_party\quictls-install ^
             no-shared no-tests enable-tls1_3 ^
-            ${{ matrix.openssl_target }}
+            VC-WIN64A
           nmake
           nmake install_sw
 
@@ -240,7 +230,7 @@ jobs:
           mkdir third_party\ngtcp2-build
           cd third_party\ngtcp2-build
           cmake ..\ngtcp2 ^
-            -G "Visual Studio 17 2022" -A ${{ matrix.platform }} ^
+            -G "Visual Studio 17 2022" -A x64 ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DENABLE_SHARED_LIB=OFF ^
             -DENABLE_STATIC_LIB=ON ^
@@ -265,7 +255,7 @@ jobs:
           mkdir build
           cd build
           cmake .. ^
-            -G "Visual Studio 17 2022" -A ${{ matrix.platform }} ^
+            -G "Visual Studio 17 2022" -A x64 ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DQUICTLS_ROOT=%GITHUB_WORKSPACE%\third_party\quictls-install ^
             -DNGTCP2_BUILD=%GITHUB_WORKSPACE%\third_party\ngtcp2-build ^
