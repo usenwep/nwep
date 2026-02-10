@@ -1,10 +1,13 @@
 cmake_minimum_required(VERSION 3.16)
 
-# Read version from a version file or set defaults
-set(NWEP_VERSION_MAJOR 0)
-set(NWEP_VERSION_MINOR 1)
-set(NWEP_VERSION_PATCH 0)
-set(NWEP_VERSION "${NWEP_VERSION_MAJOR}.${NWEP_VERSION_MINOR}.${NWEP_VERSION_PATCH}")
+# Read version from VERSION file
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" NWEP_VERSION_STRING)
+string(STRIP "${NWEP_VERSION_STRING}" NWEP_VERSION_STRING)
+string(REPLACE "." ";" NWEP_VERSION_LIST "${NWEP_VERSION_STRING}")
+list(GET NWEP_VERSION_LIST 0 NWEP_VERSION_MAJOR)
+list(GET NWEP_VERSION_LIST 1 NWEP_VERSION_MINOR)
+list(GET NWEP_VERSION_LIST 2 NWEP_VERSION_PATCH)
+set(NWEP_VERSION "${NWEP_VERSION_STRING}")
 
 project(nwep VERSION ${NWEP_VERSION} LANGUAGES C)
 
@@ -100,13 +103,13 @@ configure_file(
 
 # Third-party paths (can be overridden via -D options for cross-compilation)
 if(NOT QUICTLS_ROOT)
-  set(QUICTLS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/quictls-install")
+  set(QUICTLS_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.build/quictls-install")
 endif()
 if(NOT NGTCP2_ROOT)
   set(NGTCP2_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ngtcp2")
 endif()
 if(NOT NGTCP2_BUILD)
-  set(NGTCP2_BUILD "${CMAKE_CURRENT_SOURCE_DIR}/third_party/ngtcp2-build")
+  set(NGTCP2_BUILD "${CMAKE_CURRENT_SOURCE_DIR}/.build/ngtcp2-build")
 endif()
 if(NOT BLST_ROOT)
   set(BLST_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/blst")
@@ -269,11 +272,12 @@ target_include_directories(nwep
     ${CMAKE_CURRENT_BINARY_DIR}  # for config.h
 )
 
-# Link dependencies
+# Link dependencies (PUBLIC so consumers of the static lib get transitive deps)
+# Order matters: ngtcp2_crypto_quictls depends on ngtcp2, which depends on OpenSSL
 target_link_libraries(nwep
-  PRIVATE
-    ngtcp2::ngtcp2
+  PUBLIC
     ngtcp2::ngtcp2_crypto_quictls
+    ngtcp2::ngtcp2
     OpenSSL::SSL
     OpenSSL::Crypto
     blst::blst
@@ -373,94 +377,35 @@ if(NWEP_BUILD_TESTS)
 
   # WEB/1 CONNECT/AUTHENTICATE handshake unit test (no network)
   add_executable(test_web1_handshake tests/test_web1_handshake.c)
-  target_link_libraries(test_web1_handshake
-    PRIVATE
-      nwep
-      ngtcp2::ngtcp2_crypto_quictls
-      ngtcp2::ngtcp2
-      OpenSSL::SSL
-      OpenSSL::Crypto
-  )
+  target_link_libraries(test_web1_handshake PRIVATE nwep)
 
   # Logging unit test (Phase 11)
   add_executable(test_logging tests/test_logging.c)
-  target_link_libraries(test_logging
-    PRIVATE
-      nwep
-      ngtcp2::ngtcp2_crypto_quictls
-      ngtcp2::ngtcp2
-      OpenSSL::SSL
-      OpenSSL::Crypto
-  )
+  target_link_libraries(test_logging PRIVATE nwep)
 
   # NOTIFY message unit test (bidirectional streaming)
   add_executable(test_notify tests/test_notify.c)
-  target_link_libraries(test_notify
-    PRIVATE
-      nwep
-      ngtcp2::ngtcp2_crypto_quictls
-      ngtcp2::ngtcp2
-      OpenSSL::SSL
-      OpenSSL::Crypto
-  )
+  target_link_libraries(test_notify PRIVATE nwep)
 
   # Key lifecycle unit test (Phase 12)
   add_executable(test_key_lifecycle tests/test_key_lifecycle.c)
-  target_link_libraries(test_key_lifecycle
-    PRIVATE
-      nwep
-      ngtcp2::ngtcp2_crypto_quictls
-      ngtcp2::ngtcp2
-      OpenSSL::SSL
-      OpenSSL::Crypto
-  )
+  target_link_libraries(test_key_lifecycle PRIVATE nwep)
 
   # Merkle log unit test (Phase 13)
   add_executable(test_merkle_log tests/test_merkle_log.c)
-  target_link_libraries(test_merkle_log
-    PRIVATE
-      nwep
-      ngtcp2::ngtcp2_crypto_quictls
-      ngtcp2::ngtcp2
-      OpenSSL::SSL
-      OpenSSL::Crypto
-  )
+  target_link_libraries(test_merkle_log PRIVATE nwep)
 
   # Anchor coordination unit test (Phase 14)
   add_executable(test_anchor tests/test_anchor.c)
-  target_link_libraries(test_anchor
-    PRIVATE
-      nwep
-      ngtcp2::ngtcp2_crypto_quictls
-      ngtcp2::ngtcp2
-      OpenSSL::SSL
-      OpenSSL::Crypto
-      blst::blst
-  )
+  target_link_libraries(test_anchor PRIVATE nwep)
 
   # Client trust verification unit test (Phase 15)
   add_executable(test_trust tests/test_trust.c)
-  target_link_libraries(test_trust
-    PRIVATE
-      nwep
-      ngtcp2::ngtcp2_crypto_quictls
-      ngtcp2::ngtcp2
-      OpenSSL::SSL
-      OpenSSL::Crypto
-      blst::blst
-  )
+  target_link_libraries(test_trust PRIVATE nwep)
 
   # Server roles unit test (Phase 16)
   add_executable(test_role tests/test_role.c)
-  target_link_libraries(test_role
-    PRIVATE
-      nwep
-      ngtcp2::ngtcp2_crypto_quictls
-      ngtcp2::ngtcp2
-      OpenSSL::SSL
-      OpenSSL::Crypto
-      blst::blst
-  )
+  target_link_libraries(test_role PRIVATE nwep)
 
   # Enable CTest
   enable_testing()
@@ -473,33 +418,16 @@ if(NWEP_BUILD_TESTS)
   add_test(NAME anchor COMMAND test_anchor)
   add_test(NAME trust COMMAND test_trust)
   add_test(NAME role COMMAND test_role)
-  add_test(NAME cache COMMAND test_cache)
 
   # Cache unit test (Phase 17)
   add_executable(test_cache tests/test_cache.c)
-  target_link_libraries(test_cache
-    PRIVATE
-      nwep
-      ngtcp2::ngtcp2_crypto_quictls
-      ngtcp2::ngtcp2
-      OpenSSL::SSL
-      OpenSSL::Crypto
-      blst::blst
-  )
+  target_link_libraries(test_cache PRIVATE nwep)
+  add_test(NAME cache COMMAND test_cache)
 
   # Integration tests (end-to-end with libuv)
   add_executable(test_integration tests/test_integration.c)
   target_include_directories(test_integration PRIVATE ${LIBUV_INCLUDE_DIRS})
-  target_link_libraries(test_integration
-    PRIVATE
-      nwep
-      ngtcp2::ngtcp2_crypto_quictls
-      ngtcp2::ngtcp2
-      OpenSSL::SSL
-      OpenSSL::Crypto
-      blst::blst
-      ${LIBUV_LIBRARIES}
-  )
+  target_link_libraries(test_integration PRIVATE nwep ${LIBUV_LIBRARIES})
   target_link_directories(test_integration PRIVATE ${LIBUV_LIBRARY_DIRS})
   add_test(NAME integration COMMAND test_integration)
 endif()

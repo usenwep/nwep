@@ -1,11 +1,10 @@
-*.md
 .clangd
 compile_commands.json
 
 build/
+.build/
 .claude
 
-# Third-party build artifacts
-third_party/ngtcp2-build/
-third_party/quictls-build/
-third_party/quictls-install/
+dist/
+.local/
+CLAUDE.md

@@ -23,13 +23,21 @@ endif()
 set(OPENSSL_FOUND TRUE)
 set(OPENSSL_INCLUDE_DIR "${OPENSSL_ROOT_DIR}/include" CACHE PATH "OpenSSL include directory")
 
-# Find libraries - check both lib and lib64
+# Find libraries - check lib and lib64 for both Unix (.a) and MSVC (.lib)
 if(EXISTS "${OPENSSL_ROOT_DIR}/lib/libssl.a")
   set(_ssl "${OPENSSL_ROOT_DIR}/lib/libssl.a")
   set(_crypto "${OPENSSL_ROOT_DIR}/lib/libcrypto.a")
 elseif(EXISTS "${OPENSSL_ROOT_DIR}/lib64/libssl.a")
   set(_ssl "${OPENSSL_ROOT_DIR}/lib64/libssl.a")
   set(_crypto "${OPENSSL_ROOT_DIR}/lib64/libcrypto.a")
+elseif(EXISTS "${OPENSSL_ROOT_DIR}/lib/libssl.lib")
+  # MSVC with lib prefix
+  set(_ssl "${OPENSSL_ROOT_DIR}/lib/libssl.lib")
+  set(_crypto "${OPENSSL_ROOT_DIR}/lib/libcrypto.lib")
+elseif(EXISTS "${OPENSSL_ROOT_DIR}/lib/ssl.lib")
+  # MSVC without lib prefix
+  set(_ssl "${OPENSSL_ROOT_DIR}/lib/ssl.lib")
+  set(_crypto "${OPENSSL_ROOT_DIR}/lib/crypto.lib")
 else()
   message(FATAL_ERROR "Could not find OpenSSL libraries in ${OPENSSL_ROOT_DIR}")
 endif()
