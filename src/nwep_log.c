@@ -23,11 +23,11 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-/* Enable POSIX features for clock_gettime */
+/* Enable POSIX features for clock_gettime and snprintf */
 #if !defined(_WIN32)
-#  if !defined(_POSIX_C_SOURCE) || _POSIX_C_SOURCE < 199309L
+#  if !defined(_POSIX_C_SOURCE) || _POSIX_C_SOURCE < 200112L
 #    undef _POSIX_C_SOURCE
-#    define _POSIX_C_SOURCE 199309L
+#    define _POSIX_C_SOURCE 200112L
 #  endif
 #endif
 
