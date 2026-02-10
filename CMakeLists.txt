@@ -116,6 +116,9 @@ if(NOT BLST_ROOT)
 endif()
 
 # Find OpenSSL (quictls)
+# Prevent cmake from adding imported target includes as -isystem, which on
+# macOS Intel can cause system LibreSSL headers to shadow our quictls headers.
+set(CMAKE_NO_SYSTEM_FROM_IMPORTED ON)
 set(OPENSSL_ROOT_DIR "${QUICTLS_ROOT}")
 set(OPENSSL_USE_STATIC_LIBS TRUE)
 find_package(OpenSSL REQUIRED)
