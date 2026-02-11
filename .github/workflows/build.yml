@@ -42,7 +42,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build
-          key: deps-linux-${{ matrix.arch }}-${{ hashFiles('third_party/quictls', 'third_party/ngtcp2', 'third_party/blst') }}
+          key: deps-linux-${{ matrix.arch }}-${{ hashFiles('build.sh', 'third_party/quictls', 'third_party/ngtcp2', 'third_party/blst') }}
 
       - name: Install dependencies
         run: |
@@ -91,7 +91,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build
-          key: deps-darwin-${{ matrix.arch }}-${{ hashFiles('third_party/quictls', 'third_party/ngtcp2', 'third_party/blst') }}
+          key: deps-darwin-${{ matrix.arch }}-${{ hashFiles('build.sh', 'third_party/quictls', 'third_party/ngtcp2', 'third_party/blst') }}
 
       - name: Install dependencies
         run: brew install libuv
@@ -137,7 +137,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build
-          key: deps-mingw-${{ matrix.arch }}-${{ hashFiles('third_party/quictls', 'third_party/ngtcp2', 'third_party/blst') }}
+          key: deps-mingw-${{ matrix.arch }}-${{ hashFiles('build.sh', 'third_party/quictls', 'third_party/ngtcp2', 'third_party/blst') }}
 
       - name: Install MinGW toolchain
         run: |
@@ -183,7 +183,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .build
-          key: deps-arm-${{ matrix.arch }}-${{ hashFiles('third_party/quictls', 'third_party/ngtcp2', 'third_party/blst') }}
+          key: deps-arm-${{ matrix.arch }}-${{ hashFiles('build.sh', 'third_party/quictls', 'third_party/ngtcp2', 'third_party/blst') }}
 
       - name: Install ARM toolchain
         run: |
@@ -285,8 +285,8 @@ jobs:
       - name: Build Node.js addon
         shell: cmd
         run: |
-          cd node && npm install --ignore-scripts && cd ..
-          node\node_modules\.bin\cmake-js build ^
+          cd node && call npm install --ignore-scripts && cd ..
+          call node\node_modules\.bin\cmake-js build ^
             --out .build\node ^
             --CDNWEP_BUILD_TESTS=OFF ^
             --CDQUICTLS_ROOT=%GITHUB_WORKSPACE%\third_party\quictls-install ^

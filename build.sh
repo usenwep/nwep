@@ -815,6 +815,12 @@ build_nwep() {
 
 # Build Node.js N-API addon
 build_node() {
+  # Skip when cross-compiling — cmake-js builds for the host only
+  if [ -n "${HOST:-}" ]; then
+    log_info "Skipping Node.js addon (cross-compiling for $HOST)"
+    return 0
+  fi
+
   # Verify node is available
   command -v node >/dev/null 2>&1 || { log_error "node not found"; exit 1; }
 
