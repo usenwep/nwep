@@ -1,0 +1,36 @@
+{
+  "name": "nwep",
+  "version": "0.1.0",
+  "description": "Node.js N-API bindings for the nwep WEB/1 protocol library",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "install": "prebuild-install -r napi || ../build.sh node",
+    "build": "../build.sh node",
+    "build:debug": "cd .. && cmake-js build --out .build/node --debug --CDNWEP_BUILD_TESTS=OFF",
+    "rebuild": "cd .. && cmake-js rebuild --out .build/node --CDNWEP_BUILD_TESTS=OFF",
+    "clean": "cd .. && cmake-js clean --out .build/node",
+    "prebuild": "prebuildify --napi --strip",
+    "test": "node test/basic.test.js"
+  },
+  "dependencies": {
+    "cmake-js": "^7.3.0",
+    "node-api-headers": "^1.1.0",
+    "prebuild-install": "^7.1.0"
+  },
+  "devDependencies": {
+    "prebuildify": "^6.0.0"
+  },
+  "binary": {
+    "napi_versions": [8]
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "binding/",
+    "lib/",
+    "prebuilds/"
+  ],
+  "license": "MIT"
+}

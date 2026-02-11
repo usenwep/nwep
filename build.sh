@@ -621,9 +621,9 @@ build_blst() {
   local cross_prefix
   cross_prefix=$(get_cross_prefix)
   if [ -n "$cross_prefix" ]; then
-    CC="${cross_prefix}gcc" ./build.sh
+    CC="${cross_prefix}gcc" CFLAGS="-fPIC" ./build.sh
   else
-    ./build.sh
+    CFLAGS="-fPIC" ./build.sh
   fi
 
   log_info "blst built successfully"
@@ -679,6 +679,7 @@ build_quictls() {
     no-shared
     no-tests
     enable-tls1_3
+    -fPIC
     "$openssl_target"
   )
 
@@ -730,6 +731,7 @@ build_ngtcp2() {
 
   cmake_args=(
     -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON
     -DENABLE_SHARED_LIB=OFF
     -DENABLE_STATIC_LIB=ON
     -DENABLE_OPENSSL=ON
@@ -807,6 +809,44 @@ build_nwep() {
     log_info "nwep built successfully: $NWEP_BUILD/libnwep.a"
   else
     log_error "Failed to build nwep"
+    exit 1
+  fi
+}
+
+# Build Node.js N-API addon
+build_node() {
+  # Verify node is available
+  command -v node >/dev/null 2>&1 || { log_error "node not found"; exit 1; }
+
+  # Install npm deps if needed
+  if [ ! -d "$SCRIPT_DIR/node/node_modules" ]; then
+    log_info "Installing npm dependencies..."
+    npm --prefix "$SCRIPT_DIR/node" install --ignore-scripts
+  fi
+
+  # Build deps (already PIC on supported platforms)
+  build_blst
+  build_quictls
+  build_ngtcp2
+
+  # cmake-js must run from the repo root (where CMakeLists.txt lives)
+  # Output to .build/node/ to avoid conflicting with the C library build in build/
+  # cmake-js sets CMAKE_JS_INC which triggers POSITION_INDEPENDENT_CODE ON
+  # on the nwep target and includes the node/binding/ subdirectory
+  log_info "Building Node.js addon..."
+  cd "$SCRIPT_DIR"
+  "$SCRIPT_DIR/node/node_modules/.bin/cmake-js" build \
+    --out "$BUILD_CACHE/node" \
+    --CDNWEP_BUILD_TESTS=OFF \
+    --CDQUICTLS_ROOT="$QUICTLS_INSTALL" \
+    --CDNGTCP2_BUILD="$NGTCP2_BUILD" \
+    --CDBLST_ROOT="$THIRD_PARTY/blst"
+
+  # Verify output
+  if [ -f "$BUILD_CACHE/node/Release/nwep_napi.node" ]; then
+    log_info "Node.js addon built: .build/node/Release/nwep_napi.node"
+  else
+    log_error "Node.js addon not found after build"
     exit 1
   fi
 }
@@ -960,6 +1000,13 @@ Version: ${version}
 Libs: -L\${libdir} -lnwep_packed -lpthread -ldl
 Cflags: -I\${includedir} -DNWEP_STATICLIB
 EOF
+
+  # --- Node.js addon ---
+  if [ -f "$BUILD_CACHE/node/Release/nwep_napi.node" ]; then
+    mkdir -p "$staging/nodejs"
+    cp "$BUILD_CACHE/node/Release/nwep_napi.node" "$staging/nodejs/"
+    log_info "Including Node.js addon: nodejs/nwep_napi.node"
+  fi
 
   # --- LICENSE ---
   if [ -f "$SCRIPT_DIR/LICENSE" ]; then
@@ -1131,7 +1178,7 @@ emulate() {
 
       # Install build dependencies
       apt-get update -qq
-      apt-get install -y -qq cmake make gcc g++ perl >/dev/null 2>&1
+      apt-get install -y -qq cmake make gcc g++ perl nodejs npm >/dev/null 2>&1
 
       # Copy source to writable workdir (source mount is read-only)
       cp -a /src/. /work/
@@ -1162,6 +1209,7 @@ show_help() {
   echo "  quictls          Build quictls only"
   echo "  ngtcp2           Build ngtcp2 only"
   echo "  nwep             Build nwep only"
+  echo "  node             Build Node.js N-API addon"
   echo "  package          Package built artifacts (no rebuild)"
   echo "  package-all      Build + package all cross-compile targets"
   echo "  emulate <arch>   Build for <arch> via QEMU + Docker"
@@ -1223,6 +1271,9 @@ case "$COMMAND" in
     build_quictls
     build_ngtcp2
     build_nwep
+    if command -v node >/dev/null 2>&1; then
+      build_node
+    fi
     if [ "$DO_PACKAGE" -eq 1 ]; then
       package
     fi
@@ -1245,6 +1296,10 @@ case "$COMMAND" in
     build_ngtcp2
     build_nwep
     [ "$DO_PACKAGE" -eq 1 ] && log_warn "--package is only used with 'all' command, ignoring"
+    ;;
+  node)
+    preflight
+    build_node
     ;;
   package)
     package

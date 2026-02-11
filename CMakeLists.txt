@@ -296,6 +296,12 @@ if(WIN32)
   )
 endif()
 
+# When building as a Node.js addon (cmake-js sets CMAKE_JS_INC),
+# the nwep static lib must be PIC since it's linked into a shared .node.
+if(CMAKE_JS_INC)
+  set_target_properties(nwep PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
+
 # Set library properties
 set_target_properties(nwep PROPERTIES
   VERSION ${PROJECT_VERSION}
@@ -433,6 +439,11 @@ if(NWEP_BUILD_TESTS)
   target_link_libraries(test_integration PRIVATE nwep ${LIBUV_LIBRARIES})
   target_link_directories(test_integration PRIVATE ${LIBUV_LIBRARY_DIRS})
   add_test(NAME integration COMMAND test_integration)
+endif()
+
+# N-API binding (only when cmake-js provides CMAKE_JS_INC)
+if(CMAKE_JS_INC)
+  add_subdirectory(node/binding)
 endif()
 
 # Print configuration summary
