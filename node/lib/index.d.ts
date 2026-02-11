@@ -947,8 +947,6 @@ export function connGetRole(conn: ConnHandle): string | null;
 /** Close a connection with an error code. */
 export function connClose(conn: ConnHandle, errorCode: number): void;
 
-/** Get the peer's role as a numeric enum value. */
-export function connGetPeerRole(conn: ConnHandle): number;
 
 /* ------------------------------------------------------------------ */
 /*  Stream functions                                                  */

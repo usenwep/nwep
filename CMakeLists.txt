@@ -300,6 +300,15 @@ endif()
 # the nwep static lib must be PIC since it's linked into a shared .node.
 if(CMAKE_JS_INC)
   set_target_properties(nwep PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  # Node.js uses /MD (dynamic CRT) on MSVC. Ensure nwep matches,
+  # otherwise ngtcp2 (built with /MD) causes LNK2001 for __imp__wassert
+  # due to CRT mismatch when the addon links as a shared .node.
+  if(MSVC)
+    set_target_properties(nwep PROPERTIES
+      MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    # Also set the default for the addon target created in node/binding/
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+  endif()
 endif()
 
 # Set library properties

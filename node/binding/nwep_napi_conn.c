@@ -83,20 +83,6 @@ static napi_value napi_conn_close(napi_env env, napi_callback_info info) {
   return NULL;
 }
 
-static napi_value napi_conn_get_peer_role(napi_env env,
-                                            napi_callback_info info) {
-  napi_value argv[1];
-  if (nwep_napi_get_args(env, info, 1, 1, argv, NULL) != 0) return NULL;
-  nwep_conn *conn = (nwep_conn *)nwep_napi_get_external(env, argv[0]);
-  if (!conn) return NULL;
-
-  nwep_server_role role = nwep_conn_get_peer_role(conn);
-
-  napi_value result;
-  NWEP_NAPI_CALL(env, napi_create_int32(env, (int32_t)role, &result));
-  return result;
-}
-
 napi_value nwep_napi_init_conn(napi_env env, napi_value exports) {
   napi_property_descriptor props[] = {
       {"connGetPeerIdentity", NULL, napi_conn_get_peer_identity, NULL, NULL,
@@ -107,8 +93,6 @@ napi_value nwep_napi_init_conn(napi_env env, napi_value exports) {
        NULL},
       {"connClose", NULL, napi_conn_close, NULL, NULL, NULL, napi_default,
        NULL},
-      {"connGetPeerRole", NULL, napi_conn_get_peer_role, NULL, NULL, NULL,
-       napi_default, NULL},
   };
   napi_define_properties(env, exports, sizeof(props) / sizeof(props[0]),
                          props);
