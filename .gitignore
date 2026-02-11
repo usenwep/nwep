@@ -8,3 +8,5 @@ build/
 dist/
 .local/
 CLAUDE.md
+
+node/node_modules/
