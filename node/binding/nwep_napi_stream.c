@@ -6,7 +6,6 @@ static napi_value napi_stream_respond(napi_env env, napi_callback_info info) {
   nwep_stream *stream = (nwep_stream *)nwep_napi_get_external(env, argv[0]);
   if (!stream) return NULL;
 
-  /* argv[1] = { status, statusDetails, body } */
   napi_value status_val, details_val, body_val;
   NWEP_NAPI_CALL(env,
                   napi_get_named_property(env, argv[1], "status", &status_val));
@@ -137,7 +136,6 @@ static napi_value napi_stream_get_conn(napi_env env, napi_callback_info info) {
     return null_val;
   }
 
-  /* conn is NOT owned by us; no destructor */
   napi_value external;
   NWEP_NAPI_CALL(env,
                   napi_create_external(env, conn, NULL, NULL, &external));

@@ -1,8 +1,5 @@
 #include "nwep_napi.h"
 
-/*
- * napi_js_to_bls_pubkey extracts a nwep_bls_pubkey from a JS Buffer(48).
- */
 static int napi_js_to_bls_pubkey(napi_env env, napi_value val,
                                   nwep_bls_pubkey *pk) {
   uint8_t *data;
@@ -20,9 +17,6 @@ static int napi_js_to_bls_pubkey(napi_env env, napi_value val,
   return 0;
 }
 
-/*
- * napi_bls_pubkey_to_js serializes a nwep_bls_pubkey to a JS Buffer(48).
- */
 static napi_value napi_bls_pubkey_to_js(napi_env env,
                                          const nwep_bls_pubkey *pk) {
   uint8_t buf[NWEP_BLS_PUBKEY_LEN];
@@ -31,9 +25,6 @@ static napi_value napi_bls_pubkey_to_js(napi_env env,
   return nwep_napi_create_buffer(env, buf, NWEP_BLS_PUBKEY_LEN);
 }
 
-/*
- * napi_js_to_bls_sig extracts a nwep_bls_sig from a JS Buffer(96).
- */
 static int napi_js_to_bls_sig(napi_env env, napi_value val,
                                 nwep_bls_sig *sig) {
   uint8_t *data;
@@ -47,9 +38,6 @@ static int napi_js_to_bls_sig(napi_env env, napi_value val,
   return 0;
 }
 
-/*
- * napi_js_to_bls_keypair extracts a nwep_bls_keypair from a JS object.
- */
 static int napi_js_to_bls_keypair(napi_env env, napi_value obj,
                                    nwep_bls_keypair *kp) {
   napi_value pubkey_val, privkey_val;
@@ -239,8 +227,6 @@ static napi_value napi_anchor_set_free(napi_env env,
                                         napi_callback_info info) {
   napi_value argv[1];
   if (nwep_napi_get_args(env, info, 1, 1, argv, NULL) != 0) return NULL;
-  /* The destructor handles freeing; this is a no-op for explicit free calls
-   * since napi externals are freed on GC. Users can call this for clarity. */
   return NULL;
 }
 
@@ -321,9 +307,6 @@ static napi_value napi_anchor_set_contains(napi_env env,
   return result;
 }
 
-/*
- * napi_checkpoint_to_js converts a nwep_checkpoint to a JS object.
- */
 static napi_value napi_checkpoint_to_js(napi_env env,
                                          const nwep_checkpoint *cp) {
   napi_value obj;
@@ -357,9 +340,6 @@ static napi_value napi_checkpoint_to_js(napi_env env,
   return obj;
 }
 
-/*
- * napi_js_to_checkpoint extracts a nwep_checkpoint from a JS object.
- */
 static int napi_js_to_checkpoint(napi_env env, napi_value obj,
                                   nwep_checkpoint *cp) {
   napi_value val;
@@ -397,7 +377,6 @@ static int napi_js_to_checkpoint(napi_env env, napi_value obj,
   }
   if (nwep_napi_get_bigint_uint64(env, val, &cp->log_size) != 0) return -1;
 
-  /* signature is optional (may not be present for new checkpoints) */
   napi_valuetype vtype;
   if (napi_get_named_property(env, obj, "signature", &val) == napi_ok) {
     if (napi_typeof(env, val, &vtype) == napi_ok && vtype != napi_undefined) {
@@ -410,7 +389,6 @@ static int napi_js_to_checkpoint(napi_env env, napi_value obj,
     }
   }
 
-  /* signers is optional */
   napi_value signers_val;
   if (napi_get_named_property(env, obj, "signers", &signers_val) == napi_ok) {
     if (napi_typeof(env, signers_val, &vtype) == napi_ok &&
@@ -432,7 +410,6 @@ static int napi_js_to_checkpoint(napi_env env, napi_value obj,
     }
   }
 
-  /* numSigners override if present */
   if (napi_get_named_property(env, obj, "numSigners", &val) == napi_ok) {
     if (napi_typeof(env, val, &vtype) == napi_ok && vtype == napi_number) {
       uint32_t ns;

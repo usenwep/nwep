@@ -79,7 +79,6 @@ static napi_value napi_log_format_json(napi_env env, napi_callback_info info) {
   napi_value argv[1];
   if (nwep_napi_get_args(env, info, 1, 1, argv, NULL) != 0) return NULL;
 
-  /* Extract log entry fields */
   napi_value level_val, component_val, message_val;
   napi_get_named_property(env, argv[0], "level", &level_val);
   napi_get_named_property(env, argv[0], "component", &component_val);

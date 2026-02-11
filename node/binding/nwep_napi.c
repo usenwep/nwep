@@ -16,7 +16,6 @@ static napi_value napi_nwep_version(napi_env env, napi_callback_info info) {
 }
 
 static napi_value nwep_napi_module_init(napi_env env, napi_value exports) {
-  /* Core functions */
   napi_value init_fn, version_fn;
   napi_create_function(env, "init", NAPI_AUTO_LENGTH, napi_nwep_init, NULL,
                        &init_fn);
@@ -25,7 +24,6 @@ static napi_value nwep_napi_module_init(napi_env env, napi_value exports) {
   napi_set_named_property(env, exports, "init", init_fn);
   napi_set_named_property(env, exports, "version", version_fn);
 
-  /* Initialize all sub-modules */
   nwep_napi_init_constants(env, exports);
   nwep_napi_init_error(env, exports);
   nwep_napi_init_crypto(env, exports);

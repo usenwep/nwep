@@ -23,13 +23,11 @@ static napi_value napi_msg_encode(napi_env env, napi_callback_info info) {
   napi_value argv[1];
   if (nwep_napi_get_args(env, info, 1, 1, argv, NULL) != 0) return NULL;
 
-  /* Extract type */
   napi_value type_val;
   napi_get_named_property(env, argv[0], "type", &type_val);
   uint32_t type;
   napi_get_value_uint32(env, type_val, &type);
 
-  /* Extract headers array */
   napi_value headers_val;
   napi_get_named_property(env, argv[0], "headers", &headers_val);
   uint32_t header_count = 0;
@@ -38,7 +36,6 @@ static napi_value napi_msg_encode(napi_env env, napi_callback_info info) {
   if (is_arr) napi_get_array_length(env, headers_val, &header_count);
 
   nwep_header headers[NWEP_MAX_HEADERS];
-  /* Temp storage for header strings */
   char names[NWEP_MAX_HEADERS][256];
   uint8_t *values[NWEP_MAX_HEADERS];
   size_t value_lens[NWEP_MAX_HEADERS];
@@ -55,7 +52,6 @@ static napi_value napi_msg_encode(napi_env env, napi_callback_info info) {
                       value_lens[i]);
   }
 
-  /* Extract body */
   napi_value body_val;
   napi_get_named_property(env, argv[0], "body", &body_val);
   uint8_t *body = NULL;
@@ -121,11 +117,9 @@ static napi_value napi_msg_decode_header(napi_env env,
 }
 
 static napi_value napi_msg_encode_len(napi_env env, napi_callback_info info) {
-  /* This is a helper - takes type + header_count + body_len */
   napi_value argv[1];
   if (nwep_napi_get_args(env, info, 1, 1, argv, NULL) != 0) return NULL;
 
-  /* Minimal: just compute from type */
   nwep_msg msg;
   memset(&msg, 0, sizeof(msg));
   napi_value type_val;

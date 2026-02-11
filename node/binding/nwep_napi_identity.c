@@ -25,7 +25,6 @@ static napi_value napi_managed_identity_to_js(napi_env env,
                                 NWEP_ED25519_PUBKEY_LEN));
   }
 
-  /* Active keys */
   napi_value keys_arr;
   napi_create_array_with_length(env, id->key_count, &keys_arr);
   for (size_t i = 0; i < id->key_count; i++) {
@@ -65,7 +64,6 @@ static napi_value napi_recovery_authority_get_pubkey(napi_env env,
   napi_value argv[1];
   if (nwep_napi_get_args(env, info, 1, 1, argv, NULL) != 0) return NULL;
 
-  /* Extract RA from JS object */
   nwep_recovery_authority ra;
   memset(&ra, 0, sizeof(ra));
 
@@ -117,7 +115,6 @@ static napi_value napi_managed_identity_new(napi_env env,
 
 static napi_value napi_managed_identity_rotate(napi_env env,
                                                 napi_callback_info info) {
-  /* This needs the full managed_identity struct - simplified for now */
   (void)info;
   return nwep_napi_throw_msg(env,
                              "managedIdentityRotate: use C-level identity management");

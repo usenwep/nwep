@@ -57,7 +57,6 @@ static napi_value napi_err_to_status(napi_env env, napi_callback_info info) {
 static napi_value napi_error_format(napi_env env, napi_callback_info info) {
   napi_value argv[1];
   if (nwep_napi_get_args(env, info, 1, 1, argv, NULL) != 0) return NULL;
-  /* argv[0] is { code: number, context: string[] } */
   napi_value code_val;
   NWEP_NAPI_CALL(env,
                  napi_get_named_property(env, argv[0], "code", &code_val));

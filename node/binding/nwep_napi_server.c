@@ -21,7 +21,6 @@ static napi_value napi_server_new(napi_env env, napi_callback_info info) {
   nwep_settings settings;
   nwep_settings_default(&settings);
 
-  /* Parse settings object if provided */
   napi_valuetype vt;
   if (napi_typeof(env, argv[0], &vt) == napi_ok && vt == napi_object) {
     napi_value val;
@@ -46,9 +45,6 @@ static napi_value napi_server_new(napi_env env, napi_callback_info info) {
         settings.timeout_ms = u32;
       }
     }
-    /* compression and role are strings stored in settings;
-       they must remain valid for the lifetime of the server.
-       For simplicity, we use static strings only. */
   }
 
   nwep_server_wrap *wrap =
@@ -107,7 +103,6 @@ static napi_value napi_server_read(napi_env env, napi_callback_info info) {
   if (!wrap->server)
     return nwep_napi_throw_msg(env, "Server is freed");
 
-  /* argv[1] = path as Buffer(sizeof(nwep_path)) */
   uint8_t *path_data;
   size_t path_len;
   if (nwep_napi_get_buffer(env, argv[1], &path_data, &path_len) != 0)

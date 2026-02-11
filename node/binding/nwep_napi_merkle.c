@@ -106,7 +106,6 @@ static napi_value napi_merkle_leaf_hash(napi_env env,
   napi_value argv[1];
   if (nwep_napi_get_args(env, info, 1, 1, argv, NULL) != 0) return NULL;
 
-  /* Decode entry from JS object by encoding then feeding to leaf_hash */
   nwep_merkle_entry entry;
   memset(&entry, 0, sizeof(entry));
 
@@ -182,9 +181,6 @@ static napi_value napi_merkle_node_hash(napi_env env,
   return nwep_napi_create_buffer(env, out.data, 32);
 }
 
-/*
- * napi_js_to_merkle_proof extracts a nwep_merkle_proof from a JS object.
- */
 static int napi_js_to_merkle_proof(napi_env env, napi_value obj,
                                     nwep_merkle_proof *proof) {
   napi_value val;

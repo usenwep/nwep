@@ -1,11 +1,5 @@
 #include "nwep_napi.h"
 
-/*
- * Forward declarations for checkpoint helpers defined in nwep_napi_anchor.c.
- * We reimplement the minimal conversion functions here to avoid cross-file
- * static linkage issues.
- */
-
 static int napi_trust_js_to_bls_pubkey(napi_env env, napi_value val,
                                         nwep_bls_pubkey *pk) {
   uint8_t *data;

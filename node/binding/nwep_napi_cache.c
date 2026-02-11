@@ -1,7 +1,5 @@
 #include "nwep_napi.h"
 
-/* Identity cache */
-
 static void napi_identity_cache_destructor(napi_env env, void *data,
                                             void *hint) {
   (void)env;
@@ -183,8 +181,6 @@ static napi_value napi_identity_cache_capacity(napi_env env,
                      &result);
   return result;
 }
-
-/* Log server pool */
 
 static void napi_log_server_pool_destructor(napi_env env, void *data,
                                              void *hint) {

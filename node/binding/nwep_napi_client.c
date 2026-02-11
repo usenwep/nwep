@@ -21,7 +21,6 @@ static napi_value napi_client_new(napi_env env, napi_callback_info info) {
   nwep_settings settings;
   nwep_settings_default(&settings);
 
-  /* Parse settings object if provided */
   napi_valuetype vt;
   if (napi_typeof(env, argv[0], &vt) == napi_ok && vt == napi_object) {
     napi_value val;
@@ -138,7 +137,6 @@ static napi_value napi_client_read(napi_env env, napi_callback_info info) {
   uint64_t ts;
   if (nwep_napi_get_bigint_uint64(env, argv[2], &ts) != 0) return NULL;
 
-  /* Client read needs a path; use a zeroed path for now */
   nwep_path path;
   memset(&path, 0, sizeof(path));
 
@@ -235,7 +233,6 @@ static napi_value napi_client_get_conn(napi_env env, napi_callback_info info) {
     return null_val;
   }
 
-  /* conn is NOT owned by us; no destructor */
   napi_value external;
   NWEP_NAPI_CALL(env,
                   napi_create_external(env, conn, NULL, NULL, &external));

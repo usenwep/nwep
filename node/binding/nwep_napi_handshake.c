@@ -1,10 +1,6 @@
 #include "nwep_napi.h"
 #include <stdlib.h>
 
-/*
- * nwep_napi_hs_wrap bundles the handshake and its keypair together so
- * the destructor can free both.
- */
 typedef struct nwep_napi_hs_wrap {
   nwep_handshake hs;
   nwep_keypair kp;
@@ -96,7 +92,6 @@ static napi_value napi_handshake_free(napi_env env, napi_callback_info info) {
   if (!wrap) return NULL;
 
   nwep_handshake_free(&wrap->hs);
-  /* Zero out so double-free via destructor is safe */
   memset(&wrap->hs, 0, sizeof(wrap->hs));
   return NULL;
 }
@@ -115,7 +110,6 @@ static napi_value napi_handshake_set_params(napi_env env,
   napi_value val;
   napi_valuetype vt;
 
-  /* maxStreams */
   if (napi_get_named_property(env, argv[1], "maxStreams", &val) == napi_ok) {
     napi_typeof(env, val, &vt);
     if (vt == napi_number) {
@@ -124,7 +118,6 @@ static napi_value napi_handshake_set_params(napi_env env,
     }
   }
 
-  /* maxMessageSize */
   if (napi_get_named_property(env, argv[1], "maxMessageSize", &val) ==
       napi_ok) {
     napi_typeof(env, val, &vt);
@@ -134,7 +127,6 @@ static napi_value napi_handshake_set_params(napi_env env,
     }
   }
 
-  /* compression */
   static char compression_buf[64];
   if (napi_get_named_property(env, argv[1], "compression", &val) == napi_ok) {
     napi_typeof(env, val, &vt);
@@ -147,7 +139,6 @@ static napi_value napi_handshake_set_params(napi_env env,
     }
   }
 
-  /* role */
   static char role_buf[64];
   if (napi_get_named_property(env, argv[1], "role", &val) == napi_ok) {
     napi_typeof(env, val, &vt);

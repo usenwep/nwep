@@ -5,36 +5,21 @@
 #include <nwep/nwep.h>
 #include <string.h>
 
-/*
- * nwep_napi_throw throws a JS Error with the nwep error string.
- * Returns NULL (suitable for returning from napi_callback).
- */
 static inline napi_value nwep_napi_throw(napi_env env, int rv) {
   napi_throw_error(env, NULL, nwep_strerror(rv));
   return NULL;
 }
 
-/*
- * nwep_napi_throw_msg throws a JS Error with a custom message.
- * Returns NULL.
- */
 static inline napi_value nwep_napi_throw_msg(napi_env env, const char *msg) {
   napi_throw_error(env, NULL, msg);
   return NULL;
 }
 
-/*
- * nwep_napi_throw_type throws a JS TypeError with a message.
- * Returns NULL.
- */
 static inline napi_value nwep_napi_throw_type(napi_env env, const char *msg) {
   napi_throw_type_error(env, NULL, msg);
   return NULL;
 }
 
-/*
- * NWEP_NAPI_CALL wraps a napi_* call and returns NULL on failure.
- */
 #define NWEP_NAPI_CALL(env, call)                                             \
   do {                                                                         \
     napi_status _s = (call);                                                   \
@@ -48,9 +33,6 @@ static inline napi_value nwep_napi_throw_type(napi_env env, const char *msg) {
     }                                                                          \
   } while (0)
 
-/*
- * NWEP_NAPI_CALL_VOID is like NWEP_NAPI_CALL but for void functions.
- */
 #define NWEP_NAPI_CALL_VOID(env, call)                                        \
   do {                                                                         \
     napi_status _s = (call);                                                   \
@@ -64,10 +46,6 @@ static inline napi_value nwep_napi_throw_type(napi_env env, const char *msg) {
     }                                                                          \
   } while (0)
 
-/*
- * nwep_napi_get_args extracts up to max_argc arguments from callback_info.
- * Returns 0 on success, -1 on failure (exception already thrown).
- */
 static inline int nwep_napi_get_args(napi_env env, napi_callback_info info,
                                       size_t min_argc, size_t max_argc,
                                       napi_value *argv, size_t *actual) {
@@ -84,10 +62,6 @@ static inline int nwep_napi_get_args(napi_env env, napi_callback_info info,
   return 0;
 }
 
-/*
- * nwep_napi_get_buffer extracts a Buffer's data pointer and length.
- * Returns 0 on success, -1 on failure.
- */
 static inline int nwep_napi_get_buffer(napi_env env, napi_value val,
                                         uint8_t **data, size_t *len) {
   bool is_buf;
@@ -104,9 +78,6 @@ static inline int nwep_napi_get_buffer(napi_env env, napi_value val,
   return 0;
 }
 
-/*
- * nwep_napi_create_buffer creates a Buffer from raw data.
- */
 static inline napi_value nwep_napi_create_buffer(napi_env env,
                                                    const uint8_t *data,
                                                    size_t len) {
@@ -119,10 +90,6 @@ static inline napi_value nwep_napi_create_buffer(napi_env env,
   return buf;
 }
 
-/*
- * nwep_napi_get_string extracts a UTF-8 string into a caller-provided buffer.
- * Returns 0 on success, -1 on failure.
- */
 static inline int nwep_napi_get_string(napi_env env, napi_value val, char *buf,
                                         size_t buflen, size_t *result_len) {
   napi_valuetype type;
@@ -138,9 +105,6 @@ static inline int nwep_napi_get_string(napi_env env, napi_value val, char *buf,
   return 0;
 }
 
-/*
- * nwep_napi_get_uint32 extracts a uint32_t from a JS value.
- */
 static inline int nwep_napi_get_uint32(napi_env env, napi_value val,
                                         uint32_t *out) {
   if (napi_get_value_uint32(env, val, out) != napi_ok) {
@@ -150,9 +114,6 @@ static inline int nwep_napi_get_uint32(napi_env env, napi_value val,
   return 0;
 }
 
-/*
- * nwep_napi_get_int64 extracts an int64_t from a BigInt JS value.
- */
 static inline int nwep_napi_get_bigint_uint64(napi_env env, napi_value val,
                                                uint64_t *out) {
   bool lossless;
@@ -163,9 +124,6 @@ static inline int nwep_napi_get_bigint_uint64(napi_env env, napi_value val,
   return 0;
 }
 
-/*
- * nwep_napi_create_bigint_uint64 creates a BigInt from uint64_t.
- */
 static inline napi_value nwep_napi_create_bigint(napi_env env, uint64_t val) {
   napi_value result;
   if (napi_create_bigint_uint64(env, val, &result) != napi_ok) {
@@ -175,9 +133,6 @@ static inline napi_value nwep_napi_create_bigint(napi_env env, uint64_t val) {
   return result;
 }
 
-/*
- * nwep_napi_get_external extracts the void* from an External value.
- */
 static inline void *nwep_napi_get_external(napi_env env, napi_value val) {
   void *data;
   if (napi_get_value_external(env, val, &data) != napi_ok) {
@@ -187,17 +142,11 @@ static inline void *nwep_napi_get_external(napi_env env, napi_value val) {
   return data;
 }
 
-/*
- * nwep_napi_set_named_property is a convenience for setting properties.
- */
 static inline void nwep_napi_set_prop(napi_env env, napi_value obj,
                                        const char *name, napi_value val) {
   napi_set_named_property(env, obj, name, val);
 }
 
-/*
- * nwep_napi_keypair_to_js converts a nwep_keypair to a JS object.
- */
 static inline napi_value nwep_napi_keypair_to_js(napi_env env,
                                                    const nwep_keypair *kp) {
   napi_value obj, pubkey, privkey;
@@ -210,9 +159,6 @@ static inline napi_value nwep_napi_keypair_to_js(napi_env env,
   return obj;
 }
 
-/*
- * nwep_napi_js_to_keypair extracts a nwep_keypair from a JS object.
- */
 static inline int nwep_napi_js_to_keypair(napi_env env, napi_value obj,
                                             nwep_keypair *kp) {
   napi_value pubkey_val, privkey_val;
@@ -241,17 +187,11 @@ static inline int nwep_napi_js_to_keypair(napi_env env, napi_value obj,
   return 0;
 }
 
-/*
- * nwep_napi_nodeid_to_js converts a nwep_nodeid to a JS Buffer.
- */
 static inline napi_value nwep_napi_nodeid_to_js(napi_env env,
                                                   const nwep_nodeid *nid) {
   return nwep_napi_create_buffer(env, nid->data, NWEP_NODEID_LEN);
 }
 
-/*
- * nwep_napi_js_to_nodeid extracts a nwep_nodeid from a JS Buffer.
- */
 static inline int nwep_napi_js_to_nodeid(napi_env env, napi_value val,
                                            nwep_nodeid *nid) {
   uint8_t *data;
@@ -265,7 +205,6 @@ static inline int nwep_napi_js_to_nodeid(napi_env env, napi_value val,
   return 0;
 }
 
-/* Module registration declarations for each sub-module */
 napi_value nwep_napi_init_constants(napi_env env, napi_value exports);
 napi_value nwep_napi_init_error(napi_env env, napi_value exports);
 napi_value nwep_napi_init_crypto(napi_env env, napi_value exports);
@@ -285,4 +224,4 @@ napi_value nwep_napi_init_trust(napi_env env, napi_value exports);
 napi_value nwep_napi_init_role(napi_env env, napi_value exports);
 napi_value nwep_napi_init_cache(napi_env env, napi_value exports);
 
-#endif /* !defined(NWEP_NAPI_H) */
+#endif

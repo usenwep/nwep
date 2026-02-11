@@ -3,7 +3,6 @@
 const path = require('path');
 const fs = require('fs');
 
-/* Load the native addon. Try cmake-js output locations. */
 const addonName = 'nwep_napi.node';
 const root = path.join(__dirname, '..', '..');
 const candidates = [
